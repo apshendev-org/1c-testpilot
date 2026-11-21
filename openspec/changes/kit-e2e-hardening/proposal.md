@@ -18,6 +18,7 @@
 - Новый сброс клиента к начальной странице (`Client.reset()`); фикстура `testpilot` вызывает его перед каждым тестом.
 - `answer_dialog` без открытого диалога отвечает сразу. Ждать появления диалога можно только явно, параметром `wait`.
 - Новая фикстура `testpilot_data`: учёт созданных тестом объектов и их удаление после теста.
+- Новая команда `1c-testpilot client start|stop --profile`: запуск клиента с обработкой без MCP, процесс остаётся работать для последующих прогонов.
 - `Testpilot.epf` входит в пакет и используется по умолчанию.
 - Версия 1.9.2.post3.
 
@@ -30,6 +31,7 @@
 - `value-selection`: устойчивость `select_value` к неготовому списку выбора.
 - `dialog-answering`: поведение `answer_dialog` при отсутствии диалога.
 - `pytest-isolation`: сброс клиента перед тестом и уборка созданных тестом данных.
+- `client-launch-cli`: запуск и остановка тест-клиента из командной строки без MCP.
 - `helper-distribution`: поставка `Testpilot.epf` вместе с пакетом.
 
 ### Modified Capabilities
@@ -38,7 +40,7 @@
 
 ## Impact
 
-- Код: `app/_code_execution.py`, `app/_runtime.py` (click, input_text, answer_dialog), `app/_value_selection.py`, `app/testpilot.py` (`Client.reset`), `app/testpilot_pytest.py` (фикстуры), `pyproject.toml` (версия, package data).
+- Код: `app/_code_execution.py`, `app/_runtime.py` (click, input_text, answer_dialog), `app/_value_selection.py`, `app/testpilot.py` (`Client.reset`), `app/testpilot_pytest.py` (фикстуры), `app/_cli.py` (подкоманда `client`), `pyproject.toml` (версия, package data).
 - `onec/Testpilot/src` не меняется: в обработке фильтра нет, пересборка epf не нужна.
 - Тесты: `tests/test_code_filter.py` переписывается, добавляются unit-тесты на фейковом клиенте.
 - Документация: `README.md`, `onec/Testpilot/README.md`, `docs/PYTHON_TESTING.md`, `docs/TOOLS.md`.
