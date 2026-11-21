@@ -15,6 +15,7 @@ import _field_batches as _batches
 import _snapshots
 import _form_context
 import _action_diagnostics
+import _dialogs
 import _row_search
 import _table_reading
 import _find_pages
@@ -3444,14 +3445,14 @@ def tc_choose_user_message(text: str, key: str = None, handle: str = None) -> di
     return {'ok': True}
 
 @_action('tc_window')
-def tc_answer_dialog(confirm: bool = True, timeout: int = 5) -> dict:
-    """Wait up to timeout seconds and answer a modal question: confirm=true presses Button0, false
-    Button1. Never presses Button2; inspect the question/window for other choices. Returns
-    answered='Да'/'Нет' and question; both null means no dialog, question alone null means
-    unreadable text."""
+def tc_answer_dialog(confirm: bool = True, timeout: int = 5, answer: str = None) -> dict:
+    """Wait for a modal dialog and press a button as soon as it appears. answer is a button
+    caption (Да, Нет, ОК, Отмена, ...); without it confirm=true presses Да/ОК, false Нет/Отмена.
+    Returns answered, question and dialog (question, buttons). No dialog within timeout seconds:
+    ok=false, code=no_dialog. Prefer click(answer=...) when the click itself opens the dialog."""
     c = _need()
-    ans, question = _answer_confirm_dialog(c, confirm, max_wait=max(timeout, 0))
-    return {'ok': True, 'answered': ans, 'question': question}
+    return _dialogs.answer(sys.modules[__name__], c, answer=answer, confirm=confirm,
+                           timeout=max(timeout, 0))
 
 @_action('tc_window')
 def tc_close_user_messages_panel(key: str = None, handle: str = None) -> dict:
