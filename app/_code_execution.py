@@ -380,7 +380,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
             check_permissions=True, options=None, name=None):
     permitted = {'code': SETTINGS.code, 'query': SETTINGS.query,
                  'metadata': SETTINGS.metadata_enabled, 'function': SETTINGS.functions,
-                 'form_context': False, 'form_details': False}
+                 'form_context': False, 'form_details': False, 'form_state': False}
     if mode not in permitted:
         raise Failure('invalid_execution_mode', 'Unknown execution mode.')
     if check_permissions and not permitted[mode]:
@@ -389,7 +389,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
         raise Failure('execution_not_recordable', 'Finish XML scenario recording before using the Testpilot processing. Use Python tests for these calls.')
     if context not in ('client', 'server'):
         raise Failure('invalid_context', 'context must be client or server.')
-    if mode in ('form_context', 'form_details') and context != 'client':
+    if mode in ('form_context', 'form_details', 'form_state') and context != 'client':
         raise Failure('invalid_context', 'Form properties are read in the client context.')
     if type(timeout) not in (int, float) or not 0 < timeout <= 3600:
         raise Failure('invalid_timeout', 'timeout must be greater than zero and at most 3600 seconds.')
@@ -404,7 +404,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
     request_id = uuid.uuid4().hex
     request = dict(protocol=PROTOCOL, request_id=request_id, mode=mode, context=context,
                    code=code, query=query, parameters=parameters or {}, limit=limit)
-    if mode in ('metadata', 'form_context', 'form_details'):
+    if mode in ('metadata', 'form_context', 'form_details', 'form_state'):
         request['options'] = options
     if mode == 'function':
         request['name'] = name
@@ -460,10 +460,11 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
                 client._service_pending = None
                 return dict(ok=False, code='previous_execution_completed',
                             error='The previous execution completed. No new request was executed.', previous_result=response)
-            if mode in ('metadata', 'function', 'form_context', 'form_details'):
+            if mode in ('metadata', 'function', 'form_context', 'form_details', 'form_state'):
                 from _service_metadata import function_arguments
                 capability = {'metadata': 'metadata', 'function': 'custom_functions',
-                              'form_context': 'form_context', 'form_details': 'form_details'}[mode]
+                              'form_context': 'form_context', 'form_details': 'form_details',
+                              'form_state': 'form_state'}[mode]
                 if mode == 'metadata' and options and options.get('format') == 'tester':
                     capability = 'tester_metadata'
                 if capability not in service.get('capabilities', []):
@@ -525,3 +526,60 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
             vars(client).pop('RESYNC_TIMEOUT', None)
         else:
             client.RESYNC_TIMEOUT = old_resync
+
+
+def form_id(form_key):
+    """UUID of a ManagedForm key, as the helper identifies open forms."""
+    return form_key.rsplit('.ManagedForm[', 1)[-1].removesuffix(']') if '.ManagedForm[' in (form_key or '') else None
+
+
+def form_state(R, client, form_key, names=(), timeout=30):
+    """Modified flag, main object reference/posting and field values of an open form.
+
+    None when the helper or its form_state capability is unavailable: callers then rely
+    on UI observations only. Raises Failure for protocol errors of an available helper.
+    """
+    service = vars(client).get('_testpilot_service')
+    if service is None or 'form_state' not in service.get('capabilities', []):
+        return None
+    identifier = form_id(form_key)
+    if identifier is None:
+        return None
+    response = execute(R, client, mode='form_state', context='client',
+                       options=dict(form_id=identifier, items=list(names)), timeout=timeout, check_permissions=False)
+    if response.get('code') == 'previous_execution_completed':
+        response = execute(R, client, mode='form_state', context='client',
+                           options=dict(form_id=identifier, items=list(names)), timeout=timeout, check_permissions=False)
+    if not response.get('ok'):
+        raise Failure(response.get('code', 'helper_operation_failed'), response.get('error', 'Could not read the form state.'))
+    data = response.get('result')
+    if not isinstance(data, dict) or data.get('form_id') != identifier:
+        raise Failure('helper_protocol_error', 'The helper returned the state of a different form.')
+    if data.get('found') is False:
+        return dict(found=False)
+    values = {}
+    for item in data.get('items') or []:
+        if isinstance(item, dict) and isinstance(item.get('name'), str):
+            values[item['name']] = item.get('value')
+    obj = data.get('object') if isinstance(data.get('object'), dict) else None
+    return dict(found=True, modified=data.get('modified'), object=obj, values=values,
+                errors=data.get('errors') or [])
+
+
+def value_kind(value):
+    """Kind of a helper-prepared value: number, date, boolean, string, reference or empty."""
+    if value is None:
+        return 'empty'
+    if isinstance(value, bool):
+        return 'boolean'
+    if isinstance(value, (int, float)):
+        return 'number'
+    if isinstance(value, str):
+        return 'string'
+    if isinstance(value, dict):
+        kind = value.get('$type')
+        if kind == 'date':
+            return 'date'
+        if kind in ('ref', 'enum'):
+            return 'reference'
+    return 'other'

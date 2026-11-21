@@ -56,7 +56,7 @@
   - `app/testpilot_pytest.py` — фикстуры, маркер;
   - `app/_cli.py`;
   - `pyproject.toml`.
-- Обработка: `onec/Testpilot/src` — режим `object_state` и `value_type` в `form_details`, протокол 2. Пересборка Конфигуратором на Windows.
+- Обработка: `onec/Testpilot/src` — возможность `form_state` (состояние формы, объекта и значения полей), протокол прежний. Пересборка Конфигуратором на Windows.
 - Тесты: `tests/test_code_filter.py` переписывается, добавляются unit-тесты на фейковом клиенте.
 - Документация: `README.md`, `onec/Testpilot/README.md`, `docs/PYTHON_TESTING.md`, `docs/TOOLS.md`.
 - Совместимость:
