@@ -4,8 +4,6 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'app'))
-for name in ('TC1C_CODE_FORBIDDEN_WORDS', 'TC1C_CODE_ALLOWED_WORDS'):
-    os.environ.pop(name, None)
 
 import _code_execution as ce  # noqa: E402
 
@@ -16,64 +14,47 @@ def refused(code):
     return caught.value.result
 
 
-COMMENT_INSIDE_STRING = 'С = "начало\n// "\n|конец";\n{call}\n// "'
-
-
-@pytest.mark.parametrize('call, identifier', [
-    ('Выполнить("Результат = 42;");', 'Выполнить'),
-    ('Результат = Вычислить("42");', 'Вычислить'),
-    ('М.Удалить(0);', 'Удалить'),
-    ('КомандаСистемы("id");', 'КомандаСистемы'),
-])
-def test_comment_quote_inside_multiline_string_does_not_hide_code(call, identifier):
-    result = refused(COMMENT_INSIDE_STRING.format(call=call))
-    assert result['code'] == 'forbidden_code'
-    assert result['identifier'] == identifier
-    assert result['line'] == 4
-
-
-@pytest.mark.parametrize('newline', ['\r\n', '\r'])
-def test_crlf_and_lone_cr_line_endings(newline):
-    code = COMMENT_INSIDE_STRING.format(call='Выполнить("Результат = 42;");').replace('\n', newline)
-    result = refused(code)
-    assert result['identifier'] == 'Выполнить'
-    assert result['line'] == 4
-
-
 @pytest.mark.parametrize('code', [
-    # 1C ends a line at a lone CR: a comment stops there and the rest of the text is code.
-    '// комментарий\rВыполнить("Результат = 42;");',
-    'С = "начало\n// комментарий\r|конец"; Выполнить("Результат = 42;"); С = "ещё\n|конец";',
+    'Результат = Новый Запрос("ВЫБРАТЬ 1 КАК Х").Выполнить().Выгрузить().Количество();',
+    'Выполнить("Результат = 42;");',
+    'Результат = Вычислить("42");',
+    'Execute("Result = 42;"); Result = Eval("42");',
+    'Объект.Записать(); Объект.Удалить();',
+    'УстановитьПривилегированныйРежим(Истина); КомандаСистемы("id");',
 ])
-def test_lone_cr_ends_a_comment(code):
-    assert refused(code)['identifier'] == 'Выполнить'
-
-
-@pytest.mark.parametrize('code', [
-    'С = "начало\n// "\n|Выполнить";\n// "',
-    'С = "начало\n\n   // комментарий\n\t|Удалить ""в кавычках""\n|Записать";',
-    'С = "Выполнить(""x"")"; // Удалить',
-    'Результат = "Записать";',
-    'С = "начало\n\f|Удалить\n\v|Записать";',
-])
-def test_string_and_comment_content_is_not_code(code):
+def test_identifiers_are_not_filtered(code):
     ce.validate_code(code)
 
 
+@pytest.mark.parametrize('name', ['TC1C_CODE_FORBIDDEN_WORDS', 'TC1C_CODE_ALLOWED_WORDS'])
+def test_former_word_settings_are_ignored(monkeypatch, name):
+    monkeypatch.setenv(name, 'Сообщить')
+    monkeypatch.setattr(ce, 'SETTINGS', ce.settings())
+    ce.validate_code('Сообщить("х");')
+
+
+@pytest.mark.parametrize('code', ['', '   \n\t', None, 42])
+def test_empty_or_non_text_code_is_rejected(code):
+    assert refused(code)['code'] == 'invalid_code'
+
+
 @pytest.mark.parametrize('code', [
+    'Х = "abc;',
     'С = "начало\nВыполнить("x");',
-    'С = "начало',
     'С = "начало\n|продолжение',
 ])
 def test_unterminated_string_is_rejected(code):
     assert refused(code)['code'] == 'invalid_code'
 
 
-@pytest.mark.parametrize('word', ['Выполнить', 'Execute', 'Вычислить', 'Eval'])
-def test_dynamic_code_is_always_forbidden(monkeypatch, word):
-    monkeypatch.setenv('TC1C_CODE_ALLOWED_WORDS', word)
-    monkeypatch.setattr(ce, 'SETTINGS', ce.settings())
-    assert refused(f'{word}("id");')['identifier'] == word
+@pytest.mark.parametrize('code', [
+    'С = "начало\n// "\n|конец";',
+    'С = "начало\n\n   // комментарий\n\t|""в кавычках""\n|конец";',
+    'С = "начало\r\n// "\r\n|конец";',
+    '// комментарий с "кавычкой\rХ = 1;',
+])
+def test_multiline_strings_and_comments_are_accepted(code):
+    ce.validate_code(code)
 
 
 @pytest.mark.parametrize('query, prepared', [

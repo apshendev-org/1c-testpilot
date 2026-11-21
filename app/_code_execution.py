@@ -16,16 +16,6 @@ import tc1c
 FORM_NAME = 'ВнешняяОбработка.Testpilot.Форма.Helper'
 FORM_NAMES = frozenset({FORM_NAME, 'ExternalDataProcessor.Testpilot.Form.Helper'})
 PROTOCOL = 1
-DEFAULT_FORBIDDEN = '''Удалить Delete Записать Write
-УстановитьПривилегированныйРежим SetPrivilegedMode
-ПодключитьВнешнююКомпоненту AttachAddIn УстановитьВнешнююКомпоненту InstallAddIn
-COMОбъект COMObject УстановитьМонопольныйРежим SetExclusiveMode
-УдалитьФайлы DeleteFiles КопироватьФайл CopyFile ПереместитьФайл MoveFile
-СоздатьКаталог CreateDirectory
-КомандаСистемы System ЗапуститьПриложение RunApp
-НачатьЗапускПриложения BeginRunningApplication
-ЗапуститьПриложениеАсинх RunAppAsync'''.split()
-ALWAYS_FORBIDDEN = {'выполнить', 'execute', 'вычислить', 'eval'}
 _internal = ContextVar('testpilot_service_access', default=None)
 
 
@@ -47,7 +37,6 @@ class Settings:
     code: bool
     query: bool
     epf: str
-    forbidden: frozenset
     metadata: str = 'auto'
     functions: bool = False
     form_details: str = 'auto'
@@ -68,12 +57,8 @@ def settings():
     metadata = os.environ.get('TC1C_METADATA', 'auto').strip().lower()
     if metadata not in ('auto', 'true', 'false'):
         raise ValueError('TC1C_METADATA must be auto, true or false')
-    words = lambda name: {w.casefold() for w in re.split(r'[,;\s]+', os.environ.get(name, '')) if w}
-    forbidden = ({w.casefold() for w in DEFAULT_FORBIDDEN} |
-                 words('TC1C_CODE_FORBIDDEN_WORDS')) - words('TC1C_CODE_ALLOWED_WORDS')
     return Settings(_flag('TC1C_CODE_EXECUTION'), _flag('TC1C_QUERY_EXECUTION'),
-                    os.environ.get('TC1C_CODE_EPF', '').strip(),
-                    frozenset(forbidden | ALWAYS_FORBIDDEN), metadata, _flag('TC1C_FUNCTIONS'), form_details)
+                    os.environ.get('TC1C_CODE_EPF', '').strip(), metadata, _flag('TC1C_FUNCTIONS'), form_details)
 
 
 SETTINGS = settings()
@@ -108,10 +93,9 @@ def tokens(text, *, bsl=True):
 def validate_code(code):
     if not isinstance(code, str) or not code.strip():
         raise Failure('invalid_code', 'code must be a nonempty string.')
-    for word, start, end in tokens(code):
-        if word in SETTINGS.forbidden:
-            raise Failure('forbidden_code', 'This identifier is forbidden by the execution policy.',
-                          identifier=code[start:end], line=_bsl_lines(code).count('\n', 0, start) + 1)
+    # Identifiers are not filtered: the 1C user's rights are the boundary. Only reject malformed text.
+    for _ in tokens(code):
+        pass
 
 
 def prepare_query(query):

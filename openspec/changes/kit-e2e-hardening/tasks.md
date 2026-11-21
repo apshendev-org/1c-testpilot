@@ -2,9 +2,9 @@
 
 ## 1. Исполнение кода без фильтра
 
-- [ ] 1.1 Удалить `DEFAULT_FORBIDDEN`, `ALWAYS_FORBIDDEN`, `Settings.forbidden` и чтение `TC1C_CODE_FORBIDDEN_WORDS`/`TC1C_CODE_ALLOWED_WORDS` в `app/_code_execution.py`; `validate_code` проверяет только непустую строку и незакрытый литерал. Проверка: `grep -rn "FORBIDDEN\|ALLOWED_WORDS" app` пуст.
-- [ ] 1.2 Переписать `tests/test_code_filter.py` под `specs/code-execution`. Проверка: `uv run --extra test pytest tests/test_code_filter.py -q` зелёный.
-- [ ] 1.3 Убрать раздел о запрещённых словах из `onec/Testpilot/README.md` и `README.md`, описать защиту правами 1С и `TC1C_CODE_EXECUTION`. Проверка: grep переменных по `*.md` вне `openspec/` пуст.
+- [x] 1.1 Удалить `DEFAULT_FORBIDDEN`, `ALWAYS_FORBIDDEN`, `Settings.forbidden` и чтение `TC1C_CODE_FORBIDDEN_WORDS`/`TC1C_CODE_ALLOWED_WORDS` в `app/_code_execution.py`; `validate_code` проверяет только непустую строку и незакрытый литерал. Проверка: `grep -rn "FORBIDDEN\|ALLOWED_WORDS" app` пуст.
+- [x] 1.2 Переписать `tests/test_code_filter.py` под `specs/code-execution`. Проверка: `uv run --extra test pytest tests/test_code_filter.py -q` зелёный.
+- [x] 1.3 Убрать раздел о запрещённых словах из `onec/Testpilot/README.md` и `README.md`, описать защиту правами 1С и `TC1C_CODE_EXECUTION`. Проверка: grep переменных по `*.md` вне `openspec/` пуст.
 
 ## 2. Доработка Testpilot.epf
 
