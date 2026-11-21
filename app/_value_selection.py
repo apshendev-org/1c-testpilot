@@ -222,7 +222,7 @@ class Selector:
             buttons = [o for o in objects if o.get('class') == 'Button' and o.get('name') == 'OK']
             if len(buttons) != 1:
                 raise B.Failure('choice_type_unavailable', 'The type selection confirmation is missing or ambiguous.')
-            self.call('click', buttons[0])
+            self.call('click', buttons[0], expect='none')
             self.window = self.S._cell_window(self.c)
             if self.window == self.origin:
                 raise B.Failure('choice_not_opened', 'Type selected, but no choice window opened. Inspect the source field.')

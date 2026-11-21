@@ -16,6 +16,7 @@ import _snapshots
 import _form_context
 import _action_diagnostics
 import _dialogs
+import _effects
 import _row_search
 import _table_reading
 import _find_pages
@@ -2041,12 +2042,20 @@ def _click_guid(key):
 
 
 @_action('tc_field')
-def tc_click(key: str, handle: str, diagnostics: bool = False, diagnostics_wait: float = 2.0) -> dict:
+def tc_click(key: str, handle: str, answer: str = None, expect: str = None, timeout: float = 10,
+             diagnostics: bool = False, diagnostics_wait: float = 2.0) -> dict:
     """Click a button, field, group, decoration or command-interface button.
     For submenus, find descendant Buttons and click them directly, even through nested menus;
     opening the menus first is unnecessary.
     Use activate to focus inputs/cells/pages. window, when present, is the active window afterwards.
     window_changed=false means the previous window description still applies.
+    ok=true only with a confirmed effect: standard commands Записать/Провести/...ИЗакрыть/Закрыть/ОК/
+    Выбрать/Создать by their meaning (effect saved/posted/closed/opened, ref), any other button by any
+    observed change (effect=changed, changes). The click waits up to timeout seconds and repeats once if
+    nothing changed at all. 1C messages or an error window fail at once. A modal question fails with
+    unexpected_dialog (question, buttons) unless answer names its button caption; then it is pressed
+    and the effect is still checked. effect_not_observed has expected, window, messages and snapshot
+    (form context file). expect="none" only for buttons without any observable effect.
     diagnostics=true also reads messages, possibly from earlier actions.
     diagnostics_wait=0..60 seconds polls while messages are unavailable/empty; 0 reads
     once. Individual requests use set_max_action_time. diagnostics.status is
@@ -2055,31 +2064,42 @@ def tc_click(key: str, handle: str, diagnostics: bool = False, diagnostics_wait:
     error = _action_diagnostics.validate(diagnostics, diagnostics_wait)
     if error:
         return dict(ok=False, code='invalid_argument', error=error)
+    if expect not in (None, 'none'):
+        return dict(ok=False, code='invalid_argument', error='expect accepts only "none".')
+    if answer is not None and (not isinstance(answer, str) or not answer.strip()):
+        return dict(ok=False, code='invalid_argument', error='answer must be a button caption.')
+    if type(timeout) not in (int, float) or not 0 <= timeout <= 600:
+        return dict(ok=False, code='invalid_argument', error='timeout must be from 0 to 600 seconds.')
     c = _need()
     guid = _click_guid(key)
     if guid is None:
         return {'ok': False, 'target': key, 'code': 'unsupported_element_type',
                 'error': 'Click requires a button, field, form group, decoration or command-interface button.',
                 'suggested_action': 'activate'}
-    mark = _native_composite_begin(c, 'click') if _key_class(key) == 'Group' else None
-    ok = True
-    try:
-        for kind in ('action', 'commit'):
-            r = c.send_cmd(guid, key, kind=kind, middle=b'', handle=handle)
-            ok = ok and r['ok']
-    except tc1c.OperationError as exc:
-        if exc.status == 8 and _key_class(key) == 'Group' and _kind_of(c, key) == 'Popup':
-            return dict(exc.result(), code='submenu_click_unsupported',
-                        error='Click cannot open this submenu. Use find_objects with this submenu '
-                              'as root_ref and cls="Button", then click the desired button directly. '
-                              'This includes nested submenus; opening the menus first is unnecessary.',
-                        suggested_action='find_objects')
-        raise
-    finally:
-        if mark is not None:
-            _native_composite_end(c, mark, 'click')
-    _state['window_key'] = None          # клик мог открыть новое окно — кэш недействителен
-    result = {'ok': ok, 'target': key}
+
+    def send():
+        mark = _native_composite_begin(c, 'click') if _key_class(key) == 'Group' else None
+        ok = True
+        try:
+            for kind in ('action', 'commit'):
+                r = c.send_cmd(guid, key, kind=kind, middle=b'', handle=handle)
+                ok = ok and r['ok']
+        except tc1c.OperationError as exc:
+            if exc.status == 8 and _key_class(key) == 'Group' and _kind_of(c, key) == 'Popup':
+                return dict(exc.result(), code='submenu_click_unsupported',
+                            error='Click cannot open this submenu. Use find_objects with this submenu '
+                                  'as root_ref and cls="Button", then click the desired button directly. '
+                                  'This includes nested submenus; opening the menus first is unnecessary.',
+                            suggested_action='find_objects')
+            raise
+        finally:
+            if mark is not None:
+                _native_composite_end(c, mark, 'click')
+        _state['window_key'] = None          # клик мог открыть новое окно — кэш недействителен
+        return {'ok': ok, 'target': key}
+
+    result = _effects.run(sys.modules[__name__], c, key, send, answer=answer, expect=expect, timeout=timeout)
+    ok = result.get('ok')
     if ok and (READBACK or diagnostics):
         result.update(_action_diagnostics.collect(sys.modules[__name__], c, diagnostics, diagnostics_wait))
     return result

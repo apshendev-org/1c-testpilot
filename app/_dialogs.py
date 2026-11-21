@@ -9,9 +9,9 @@ _YES = ('да', 'yes', 'ок', 'ok')
 _NO = ('нет', 'no', 'отмена', 'cancel')
 
 
-def detect(S, c):
+def detect(S, c, window=None):
     """The active modal message box, or None: window key, question text and buttons."""
-    window = S._window(c)
+    window = window if window is not None else S._window(c)
     key = window.get('key')
     if not key:
         return None

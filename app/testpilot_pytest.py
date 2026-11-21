@@ -169,6 +169,9 @@ def testpilot(request, testpilot_artifacts):
             screenshots=mode != 'off', default_mode=mode, reports=reports,
             allure_factory=_log_reports.PytestAllure if allure_enabled else None,
             allure_directory=request.config.option.allure_report_dir if allure_enabled else None)
+    # Слепки неподтверждённых кликов попадают в артефакты этого теста.
+    artifacts_env = os.environ.get('TC1C_ARTIFACTS_DIR')
+    os.environ['TC1C_ARTIFACTS_DIR'] = str(testpilot_artifacts)
     cleanup_error = None
     diagnostics = None
     client = None
@@ -201,6 +204,10 @@ def testpilot(request, testpilot_artifacts):
         except Exception as exc:
             cleanup_error = str(exc)
             session.started = False
+        if artifacts_env is None:
+            os.environ.pop('TC1C_ARTIFACTS_DIR', None)
+        else:
+            os.environ['TC1C_ARTIFACTS_DIR'] = artifacts_env
         summary = {'test': request.node.nodeid,
                    'outcome': report.outcome if report else (setup.outcome if setup else 'setup_failed'),
                    'cleanup_error': cleanup_error}

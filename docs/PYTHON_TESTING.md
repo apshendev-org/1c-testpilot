@@ -280,6 +280,12 @@ table.set_list_settings(filters=[], replace=True)  # Убрать отбор, о
 
 ## Ошибки и отчёты
 
+`click` проверяет свой эффект сам: `form.find_object(name="ФормаЗаписать").click()` вернётся только после
+записи, иначе `ActionError` с `effect_not_observed`, сообщениями 1С и путём `snapshot` к
+контексту формы в артефактах теста. Вопрос, открытый кликом, отвечается в том же вызове:
+`...find_object(name="ФормаЗаписатьИЗакрыть").click(answer="Да")`. Кнопке без видимого эффекта передайте
+`expect="none"`. Таблица эффектов — в [TOOLS.md](TOOLS.md).
+
 Панель сообщений открывается через `client.open_user_messages_panel()` или
 `window.open_user_messages_panel()`. `get_user_message_texts()` временно открывает
 закрытую панель и восстанавливает её состояние после чтения. Автоматическое открытие

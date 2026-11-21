@@ -354,7 +354,7 @@ def prepare(R, client, path, deadline):
                     if _configured_warning(message, path):
                         yes = [o for o in children if o.get('class') == 'Button' and o.get('title') in ('Да', 'Yes')]
                         if len(yes) == 1:
-                            _checked(R.tc_click(**_address(yes[0])))
+                            _checked(R.tc_click(**_address(yes[0]), expect='none'))
                             break
                     if message:
                         raise Failure('helper_startup_blocked', 'A startup dialog requires attention.', dialog=message)
