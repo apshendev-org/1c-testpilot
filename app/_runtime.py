@@ -16,6 +16,7 @@ import _snapshots
 import _form_context
 import _action_diagnostics
 import _dialogs
+import _client_registry
 import _effects
 import _typed_input
 import _row_search
@@ -1310,6 +1311,15 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
     and stops with the server. connect=false confirms only an answering port, not a usable client."""
     if desktop not in ('default', 'isolated'):
         return {'ok': False, 'code': 'invalid_desktop', 'error': 'desktop must be default or isolated.'}
+    reuse = _state.pop('_launch_reuse', None)
+    registry = _state.pop('_launch_registry', None)
+    listening = _state.pop('_launch_listening', None)
+    if reuse is not None:
+        # Живой клиент профиля из .testpilot-clients.json: подключение без нового процесса.
+        out = {'ok': True, 'pid': reuse.get('pid'), 'port': reuse['port'], 'reused': True}
+        if connect:
+            out['connected'] = tc_connect(reuse['port'], version=reuse.get('version') or version)
+        return out
     if desktop == 'isolated' and os.name != 'nt' and sys.platform != 'linux':
         return {'ok': False, 'code': 'isolated_desktop_unsupported',
                 'error': 'Isolated desktops are supported on Windows 10 or newer and Linux. Use desktop=default.'}
@@ -1397,6 +1407,11 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
     if not up:
         return _finish_client_launch({'ok': False, 'pid': proc.pid, 'desktop': desktop,
                 'error': 'the client did not start listening on port %d within %d s' % (port, wait)})
+    if registry is not None and _state.get('profile'):
+        _client_registry.record(registry, _state['profile'], port=port, pid=proc.pid, host='127.0.0.1',
+                                version=version)
+    if listening is not None:
+        listening()
     out = {'ok': True, 'pid': proc.pid, 'port': port, 'exe': exe, 'version': version, 'desktop': desktop}
     if connect:
         # порт открывается раньше, чем платформа проверила базу, поэтому ok=true по одному порту
@@ -1513,6 +1528,9 @@ def tc_stop_client(graceful_timeout: float = 15) -> dict:
     _state.pop('launched_process', None)
     _state.pop('launched_port', None)
     _state.pop('_code_launch_path', None)
+    registry = _profiles.registry_file()
+    if registry is not None and _state.get('profile'):
+        _client_registry.forget(registry, _state['profile'], port)
     return {'ok': True, 'stopped_pid': pid, **shutdown}
 
 @_action('tc_session')
@@ -7581,6 +7599,7 @@ def _dispatch_action(acts, group, kw):
     profile = None
     helper_epf = None
     password_token = None
+    machine_lock = None
     try:
         if name not in acts:
             return _dispatch_connected_action(acts, group, kw)
@@ -7606,6 +7625,20 @@ def _dispatch_action(acts, group, kw):
                 raise _profiles.ProfileError('profile_only_setting', 'The processing path is set in the server settings or a launch profile.')
             args, profile = _profiles.resolve(name, args)
             helper_epf = args.pop('code_epf', None)
+            port_range = args.pop('port_range', None) if name == 'launch_client' else None
+            registry = _profiles.registry_file() if profile is not None and name == 'launch_client' else None
+            reuse = _client_registry.live(registry, profile) if registry is not None else None
+            if reuse is not None:
+                args['port'] = reuse['port']
+            elif port_range is not None and args.get('port') is None:
+                # Порт выбирается и занимается клиентом под общей блокировкой машины.
+                machine_lock = _client_registry.MachineLock(args.get('wait', 120)).acquire()
+                try:
+                    args['port'] = _client_registry.first_free(_client_registry.parse_range(port_range),
+                        exclude={c['port'] for c in _connection_pool().list() if c.get('port')})
+                except Exception:
+                    machine_lock.release()
+                    raise
             kw = {'action': name, **args}
             if profile is not None:
                 password_token = _profiles.PASSWORD.set(args.get('password'))
@@ -7614,7 +7647,7 @@ def _dispatch_action(acts, group, kw):
             params = bound.arguments
             launching = name == 'launch_client'
             connection = _connection_pool().reserve('127.0.0.1' if launching else params['host'], params['port'],
-                launch=launching, connection_id=connection_id,
+                launch=launching and reuse is None, connection_id=connection_id,
                 base=params.get('base'), user=params.get('user'))
             kw['port'] = connection.port
             if launching:
@@ -7633,6 +7666,9 @@ def _dispatch_action(acts, group, kw):
         with _connection_pool().use(connection, action=name):
             if name == 'launch_client':
                 _state['_code_epf'] = helper_epf
+                _state['_launch_reuse'] = reuse
+                _state['_launch_registry'] = registry
+                _state['_launch_listening'] = machine_lock.release if machine_lock is not None else None
             previous_profile = _state.get('profile')
             previous_client = _state.get('client')
             if profile is not None:
@@ -7649,11 +7685,13 @@ def _dispatch_action(acts, group, kw):
                     _state['profile'] = previous_profile
                 if name in ('connect', 'launch_client', 'disconnect', 'stop_client'):
                     _connection_pool().finish(connection)
-    except (_connections.ConnectionError, _profiles.ProfileError) as exc:
+    except (_connections.ConnectionError, _profiles.ProfileError, _client_registry.RegistryError) as exc:
         result = {'ok': False, 'code': exc.code, 'error': str(exc), **getattr(exc, 'details', {})}
         if exc.code in ('connection_required', 'connection_not_found', 'not_connected'):
             result['connections'] = _connection_pool().list()
         return _deliver(_profiles.redact(result))
     finally:
+        if machine_lock is not None:
+            machine_lock.release()
         if password_token is not None:
             _profiles.PASSWORD.reset(password_token)
