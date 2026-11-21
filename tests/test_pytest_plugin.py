@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 
@@ -153,7 +154,7 @@ def test_one(testpilot):
     result.assert_outcomes(errors=1)
 
 
-def test_data_is_deleted_in_reverse_order_and_failures_listed(run):
+def test_data_is_deleted_in_reverse_order_and_failures_listed(run, pytester):
     result, events = run('''
 def test_ok(testpilot_data):
     testpilot_data.create("...")
@@ -162,10 +163,12 @@ def test_ok(testpilot_data):
 def test_failed_delete(testpilot_data):
     testpilot_data.track({"$type": "ref", "metadata": "Документ.Р", "uuid": "bad"})
     assert False, "test failure does not skip deletion"
-''')
+''', '--tc-artifacts', 'art')
     assert ['delete', ['d', 'k', 'p']] in events and ['delete', ['bad']] in events
     result.assert_outcomes(passed=1, failed=1, errors=1)
     result.stdout.fnmatch_lines(['*was not deleted*locked*'])
+    summary = json.loads(next((pytester.path / 'art').glob('test_failed_delete*/result.json')).read_text(encoding='utf8'))
+    assert summary['data_error'][0]['error'] == 'locked'
 
 
 def test_ref_from_navigation_link():

@@ -297,6 +297,8 @@ def testpilot(request, testpilot_artifacts, testpilot_user):
                    'cleanup_error': cleanup_error}
         if setup_error is not None:
             summary['setup_error'] = setup_error
+        if getattr(request.node, '_testpilot_data_error', None) is not None:
+            summary['data_error'] = request.node._testpilot_data_error
         if session.recovery is not None:
             summary['client_recovery'] = session.recovery
         (testpilot_artifacts/'result.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf8')
@@ -412,11 +414,16 @@ class TestData:
 
 
 @pytest.fixture
-def testpilot_data(testpilot):
+def testpilot_data(testpilot, request):
     """create(code, parameters), track(ref), track_window(); deletion after the test, even a failed one."""
     data = TestData(testpilot)
     yield data
-    result = data.cleanup()
+    try:
+        result = data.cleanup()
+    except Exception as exc:
+        request.node._testpilot_data_error = str(exc)   # testpilot завершается позже и пишет это в result.json
+        raise
     if result and result.get('errors'):
+        request.node._testpilot_data_error = result['errors']
         pytest.fail('Testpilot data was not deleted: ' + json.dumps(result['errors'], ensure_ascii=False),
                     pytrace=False)
