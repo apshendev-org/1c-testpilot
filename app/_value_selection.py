@@ -204,17 +204,29 @@ class Selector:
             raise B.Failure('unsupported_choice_text', 'Choice-form positioning does not support literal * or ?. Use other distinguishing columns.')
         self.active(self.window)
         self.call('goto_first_row', table)
+        if self.result.get('searched'):
+            # Поиск подсвечивает совпадения разметкой в тексте ячеек, и GotoRow по чистому тексту их не находит.
+            for _ in range(len(rows)):
+                if self.current_matches(table, metadata, match):
+                    return found[0]
+                self.call('goto_next_row', table)
+            raise B.Failure('choice_changed', 'The matching row could not be positioned.')
         position = self.call('goto_row', table, fields=match)
         if position.get('found') is not True:
             raise B.Failure('choice_changed', 'The matching row could not be positioned.')
+        if not self.current_matches(table, metadata, match):
+            raise B.Failure('choice_changed', 'The current row no longer matches the requested values.')
+        return found[0]
+
+    def current_matches(self, table, metadata, match):
         for title, wanted in match.items():
             cols = [o for o in metadata if o.get('title') == title]
             if len(cols) != 1 or not cols[0].get('name'):
                 raise B.Failure('choice_column_unavailable', 'The positioned row cannot be checked: ' + title)
             actual = self.call('get_cell_text', table, column=cols[0]['name']).get('text')
             if not isinstance(actual, str) or text(actual) != wanted:
-                raise B.Failure('choice_changed', 'The current row no longer matches the requested values.')
-        return found[0]
+                return False
+        return True
 
     def search(self, table, value, failure):
         self.stage = 'search_choice'

@@ -161,3 +161,27 @@ def test_unavailable_list_search_keeps_not_found():
     with pytest.raises(B.Failure) as error:
         selector.form('1С:Бухгалтерия 8', None, None, None, None)
     assert error.value.code == 'choice_not_found' and error.value.details['search']['code'] == 'search_field_unavailable'
+
+
+def test_searched_rows_are_walked_by_plain_text():
+    rows = ['1С:Бухгалтерия 8 КОРП', '1С:Бухгалтерия 8']
+    position, calls = [0], []
+    mark = lambda value: value.replace('1С:Бухгалтерия', '<b><colorstyle -46>1С:Бухгалтерия</></>')  # noqa: E731
+
+    def call(action, obj, **kw):
+        calls.append(action)
+        if action == 'read_rows':
+            return dict(ok=True, rows=[{'Наименование': r} for r in rows], row_count=len(rows))
+        if action == 'goto_first_row':
+            position[0] = 0
+        if action == 'goto_next_row':
+            position[0] += 1
+        if action == 'get_cell_text':
+            return dict(ok=True, text=mark(rows[position[0]]))
+        return dict(ok=True)
+    S = SimpleNamespace(_cell_window=lambda c, expected=None: 'Choice',
+                        _table_columns=lambda c, key: [dict(title='Наименование', name='СписокНаименование')])
+    selector = V.Selector(S, None, 'F.EditField[Номенклатура]', 'h', 500)
+    selector.call, selector.window, selector.result['searched'] = call, 'Choice', True
+    row = selector.locate(dict(key='T', handle='t'), None, '1С:Бухгалтерия 8', None)
+    assert row == {'Наименование': '1С:Бухгалтерия 8'} and position == [1] and 'goto_row' not in calls
