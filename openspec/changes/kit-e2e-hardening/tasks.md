@@ -33,8 +33,8 @@
 
 ## 6. Повтор select_value
 
-- [ ] 6.1 Повтор шага при `unsupported_receiver`, пока значение поля не изменилось и не истёк `timeout`; `attempts` в ответе. Проверка: unit-тесты по `specs/value-selection`.
-- [ ] 6.2 Описать повтор в `docs/TOOLS.md`. Проверка: раздел `select_value` упоминает `attempts`.
+- [x] 6.1 Повтор шага при `unsupported_receiver`, пока значение поля не изменилось и не истёк `timeout`; `attempts` в ответе. Проверка: unit-тесты по `specs/value-selection`.
+- [x] 6.2 Описать повтор в `docs/TOOLS.md`. Проверка: раздел `select_value` упоминает `attempts`.
 
 ## 7. Профили, пул портов, несколько клиентов
 

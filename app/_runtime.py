@@ -4035,6 +4035,7 @@ def tc_select_value(key: str, handle: str, value: str = None, match: _value_sele
     choice_column limits value to a column title; data_type chooses a displayed type in the standard
     type dialog. expected checks accepted field text. Returns accepted value and verification.
     max_rows=1..10000; timeout is in seconds, 0<timeout<=3600, and covers the action.
+    A list step refused with unsupported_receiver is re-read and repeated until timeout; attempts counts tries.
     Failure leaves the UI and does not undo sent choices. Table cells use the current row and
     leave row editing open."""
     c = _need()

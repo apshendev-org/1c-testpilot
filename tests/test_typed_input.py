@@ -86,3 +86,44 @@ def test_reference_input_reports_candidates(monkeypatch, code, mapped):
     monkeypatch.setattr(V, 'run', lambda S, c, key, handle, value: dict(ok=False, code=code, candidates=['a']))
     result = R._reference_input(None, 'F.EditField[Поле]', 'h', 'a')
     assert result['code'] == mapped and result['candidates'] == ['a'] and result['committed'] is False
+
+
+def flaky(refusals, field=lambda: 'old'):
+    """Dropdown whose choice step is refused `refusals` times with status 17."""
+    stub = Dropdown(['Программные продукты 1С', '1С:Бухгалтерия 8'])
+    calls = []
+
+    def choose(value, **kw):
+        calls.append(value)
+        if len(calls) <= refusals:
+            return dict(ok=False, code='unsupported_receiver')
+        stub.chosen = value
+        return dict(ok=True)
+    stub.S.tc_choose_from_drop_list = choose
+    selector = V.Selector(stub.S, SimpleNamespace(_io_deadline=None), 'F.EditField[Номенклатура]', 'h', 500)
+    selector.origin, selector.result['value_before'] = None, 'old'
+    selector.field_text = field
+    return selector, stub, calls
+
+
+def test_refused_choice_is_repeated(monkeypatch):
+    monkeypatch.setattr(V, '_RETRY_PAUSE', 0.01)
+    selector, stub, calls = flaky(2)
+    assert selector.retry(lambda: selector.dropdown('1С:Бухгалтерия 8')) is True
+    assert stub.chosen == 1 and selector.attempts == 3
+
+
+def test_refusal_until_timeout_reports_attempts(monkeypatch):
+    monkeypatch.setattr(V, '_RETRY_PAUSE', 0.01)
+    selector, stub, calls = flaky(10 ** 6)
+    selector.c._io_deadline = __import__('time').monotonic() + 0.1
+    with pytest.raises(B.Failure) as error:
+        selector.retry(lambda: selector.dropdown('1С:Бухгалтерия 8'))
+    assert error.value.code == 'unsupported_receiver' and error.value.details['attempts'] > 1
+    assert selector.selection_sent is True
+
+
+def test_changed_value_stops_repeating(monkeypatch):
+    monkeypatch.setattr(V, '_RETRY_PAUSE', 0.01)
+    selector, stub, calls = flaky(5, field=lambda: '1С:Бухгалтерия 8')
+    assert selector.retry(lambda: selector.dropdown('1С:Бухгалтерия 8')) == 'changed' and len(calls) == 1

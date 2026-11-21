@@ -11,6 +11,9 @@ from _row_search import _HIGHLIGHT
 Match = Annotated[dict[StrictStr, StrictStr], Field(min_length=1, max_length=32)]
 
 
+_RETRY_PAUSE = 0.2
+
+
 def text(value):
     return _HIGHLIGHT.sub(r'\1', value)
 
@@ -31,7 +34,30 @@ class Selector:
         self.selection_sent = False
         self.window = None
         self.accepted_expected = None
+        self.attempts = 1
         self.result = dict(ok=False, target=key, verified=False)
+
+    def retry(self, step):
+        """Repeat a list step refused while the client list is not ready (status 17).
+
+        Returns 'changed' instead of repeating once the field value already differs: a refused
+        frame may still have chosen the item, and only verification may judge it."""
+        while True:
+            try:
+                return step()
+            except B.Failure as exc:
+                if exc.code != 'unsupported_receiver':
+                    raise
+                deadline = getattr(self.c, '_io_deadline', None)
+                if deadline is not None and time.monotonic() + _RETRY_PAUSE >= deadline:
+                    exc.details['attempts'] = self.attempts
+                    raise
+                if self.selection_sent:
+                    self.active(self.origin)
+                    if self.field_text() != self.result.get('value_before'):
+                        return 'changed'
+                self.attempts += 1
+                time.sleep(_RETRY_PAUSE)
 
     def call(self, action, obj, **kw):
         return require(getattr(self.S, 'tc_' + action)(key=obj['key'], handle=obj['handle'], **kw))
@@ -235,12 +261,17 @@ class Selector:
             if any(o.get('name') == 'TypeTree' for o in objects):
                 raise B.Failure('choice_type_unconfirmed', 'The type dialog did not close.')
         table = self.table_for(objects, choice_table)
-        row = self.locate(table, match, value, choice_column)
-        self.stage = 'choose_row'
-        self.active(self.window)
-        self.selection_sent = True
-        self.call('choose_row', table)
-        self.result.update(method='choice_form', matched_row=row, scope='selectable_rows')
+
+        def choose():
+            row = self.locate(table, match, value, choice_column)
+            self.stage = 'choose_row'
+            self.active(self.window)
+            self.selection_sent = True
+            self.call('choose_row', table)
+            return row
+        row = self.retry(choose)
+        self.result.update(method='choice_form', matched_row=None if row == 'changed' else row,
+                           scope='selectable_rows')
         # Choosing a folder or a row in an unrelated list may open a card instead.
         self.active(self.origin)
         if any(o.get('key') == self.window for o in self.S._read_open_windows(self.c)):
@@ -306,15 +337,16 @@ def run(S, c, key, handle, *, value=None, match=None, choice_table=None, choice_
     c._io_deadline = min(deadline if deadline is not None else float('inf'), time.monotonic() + timeout)
     try:
         selector.prepare()
-        if match is not None or choice_table or choice_column or data_type or not selector.dropdown(value):
+        if match is not None or choice_table or choice_column or data_type or not selector.retry(
+                lambda: selector.dropdown(value)):
             selector.form(value, match, choice_table, choice_column, data_type)
         selector.verify(value, expected)
-        return selector.result
+        return dict(selector.result, attempts=selector.attempts)
     except Exception as exc:
         failure = (dict(code='selection_timeout', error='Selection timed out. Inspect the field and open choice window before retrying.')
                    if isinstance(exc, TimeoutError) else B.error(exc))
         return dict(selector.result, **failure, ok=False, selected=None if selector.selection_sent else False,
-                    stage=selector.stage, selection_sent=selector.selection_sent)
+                    stage=selector.stage, selection_sent=selector.selection_sent, attempts=selector.attempts)
     finally:
         c._io_deadline = deadline
         S._refs.for_client(c).remember(key, handle)
