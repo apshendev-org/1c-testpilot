@@ -11,6 +11,9 @@ from _row_search import _HIGHLIGHT
 Match = Annotated[dict[StrictStr, StrictStr], Field(min_length=1, max_length=32)]
 
 
+_RETRY_PAUSE = 0.2
+
+
 def text(value):
     return _HIGHLIGHT.sub(r'\1', value)
 
@@ -31,7 +34,30 @@ class Selector:
         self.selection_sent = False
         self.window = None
         self.accepted_expected = None
+        self.attempts = 1
         self.result = dict(ok=False, target=key, verified=False)
+
+    def retry(self, step):
+        """Repeat a list step refused while the client list is not ready (status 17).
+
+        Returns 'changed' instead of repeating once the field value already differs: a refused
+        frame may still have chosen the item, and only verification may judge it."""
+        while True:
+            try:
+                return step()
+            except B.Failure as exc:
+                if exc.code != 'unsupported_receiver':
+                    raise
+                deadline = getattr(self.c, '_io_deadline', None)
+                if deadline is not None and time.monotonic() + _RETRY_PAUSE >= deadline:
+                    exc.details['attempts'] = self.attempts
+                    raise
+                if self.selection_sent:
+                    self.active(self.origin)
+                    if self.field_text() != self.result.get('value_before'):
+                        return 'changed'
+                self.attempts += 1
+                time.sleep(_RETRY_PAUSE)
 
     def call(self, action, obj, **kw):
         return require(getattr(self.S, 'tc_' + action)(key=obj['key'], handle=obj['handle'], **kw))
@@ -104,7 +130,9 @@ class Selector:
             raise B.Failure('choice_list_unavailable', 'The open choice list could not be read.')
         indexes = [i for i, v in enumerate(values) if v == value]
         if len(indexes) > 1:
-            raise B.Failure('ambiguous_choice', 'Several choices have this exact text. Use match to select through the choice form.')
+            items = choices.get('items') or []
+            raise B.Failure('ambiguous_choice', 'Several choices have this exact text. Use match to select through the choice form.',
+                            details={'candidates': [items[i] if len(items) == len(values) else values[i] for i in indexes]})
         if not indexes:
             self.call('close_drop_list', self.source)
             if self.call('drop_list_is_open', self.source).get('open') is not False:
@@ -155,7 +183,8 @@ class Selector:
                 if len(candidates) > 1:
                     raise B.Failure('ambiguous_choice_column', 'The value occurs in several columns. Specify choice_column or match.')
                 if not candidates:
-                    raise B.Failure('choice_not_found', 'No exact value was found in the selectable rows of this choice table.')
+                    raise B.Failure('choice_not_found', 'No exact value was found in the selectable rows of this choice table.',
+                                    details={'candidates': similar(rows, value)})
                 column = next(iter(candidates))
             match = {column: value}
         for name in match:
@@ -167,23 +196,46 @@ class Selector:
         if len(found) != 1:
             raise B.Failure('ambiguous_choice' if found else 'choice_not_found',
                             'Several rows match. Add distinguishing columns.' if found else
-                            'No exact match in the selectable rows of this choice table.', details={'match_count': len(found)})
+                            'No exact match in the selectable rows of this choice table.',
+                            details={'match_count': len(found),
+                                     'candidates': found[:20] if found else similar(rows, ' '.join(match.values()))})
         # GotoRow treats * and ? as patterns. Never turn literal user input into a wildcard selection.
         if any('*' in v or '?' in v for v in match.values()):
             raise B.Failure('unsupported_choice_text', 'Choice-form positioning does not support literal * or ?. Use other distinguishing columns.')
         self.active(self.window)
         self.call('goto_first_row', table)
+        if self.result.get('searched'):
+            # Поиск подсвечивает совпадения разметкой в тексте ячеек, и GotoRow по чистому тексту их не находит.
+            for _ in range(len(rows)):
+                if self.current_matches(table, metadata, match):
+                    return found[0]
+                self.call('goto_next_row', table)
+            raise B.Failure('choice_changed', 'The matching row could not be positioned.')
         position = self.call('goto_row', table, fields=match)
         if position.get('found') is not True:
             raise B.Failure('choice_changed', 'The matching row could not be positioned.')
+        if not self.current_matches(table, metadata, match):
+            raise B.Failure('choice_changed', 'The current row no longer matches the requested values.')
+        return found[0]
+
+    def current_matches(self, table, metadata, match):
         for title, wanted in match.items():
             cols = [o for o in metadata if o.get('title') == title]
             if len(cols) != 1 or not cols[0].get('name'):
                 raise B.Failure('choice_column_unavailable', 'The positioned row cannot be checked: ' + title)
             actual = self.call('get_cell_text', table, column=cols[0]['name']).get('text')
             if not isinstance(actual, str) or text(actual) != wanted:
-                raise B.Failure('choice_changed', 'The current row no longer matches the requested values.')
-        return found[0]
+                return False
+        return True
+
+    def search(self, table, value, failure):
+        self.stage = 'search_choice'
+        self.result['searched'] = True
+        found = self.S._list_search.run(self.S, self.c, table['key'], table['handle'], value,
+                                        max_rows=self.max_rows, settle_time=0.5)
+        if not found.get('ok'):
+            failure.details['search'] = {k: found.get(k) for k in ('code', 'error')}
+            raise failure
 
     def form(self, value, match, choice_table, choice_column, data_type):
         self.stage = 'open_choice'
@@ -222,7 +274,7 @@ class Selector:
             buttons = [o for o in objects if o.get('class') == 'Button' and o.get('name') == 'OK']
             if len(buttons) != 1:
                 raise B.Failure('choice_type_unavailable', 'The type selection confirmation is missing or ambiguous.')
-            self.call('click', buttons[0])
+            self.call('click', buttons[0], expect='none')
             self.window = self.S._cell_window(self.c)
             if self.window == self.origin:
                 raise B.Failure('choice_not_opened', 'Type selected, but no choice window opened. Inspect the source field.')
@@ -230,12 +282,24 @@ class Selector:
             if any(o.get('name') == 'TypeTree' for o in objects):
                 raise B.Failure('choice_type_unconfirmed', 'The type dialog did not close.')
         table = self.table_for(objects, choice_table)
-        row = self.locate(table, match, value, choice_column)
-        self.stage = 'choose_row'
-        self.active(self.window)
-        self.selection_sent = True
-        self.call('choose_row', table)
-        self.result.update(method='choice_form', matched_row=row, scope='selectable_rows')
+
+        def choose():
+            try:
+                row = self.locate(table, match, value, choice_column)
+            except B.Failure as exc:
+                # Иерархический список показывает верхний уровень: ищем строкой поиска списка, как человек.
+                if exc.code != 'choice_not_found' or match is not None or self.result.get('searched'):
+                    raise
+                self.search(table, value, exc)
+                row = self.locate(table, match, value, choice_column)
+            self.stage = 'choose_row'
+            self.active(self.window)
+            self.selection_sent = True
+            self.call('choose_row', table)
+            return row
+        row = self.retry(choose)
+        self.result.update(method='choice_form', matched_row=None if row == 'changed' else row,
+                           scope='selectable_rows')
         # Choosing a folder or a row in an unrelated list may open a card instead.
         self.active(self.origin)
         if any(o.get('key') == self.window for o in self.S._read_open_windows(self.c)):
@@ -267,6 +331,12 @@ class Selector:
                            changed=actual != self.result['value_before'] if self.result['value_before'] is not None else None)
 
 
+def similar(rows, value, limit=20):
+    """Rows whose displayed text contains the value: hints for a failed exact choice."""
+    wanted = (value or '').casefold()
+    return [row for row in rows if wanted and any(wanted in text(v).casefold() for v in row.values())][:limit]
+
+
 def validate_options(*, value=None, match=None, choice_table=None, choice_column=None,
                      data_type=None, expected=None, max_rows=500, timeout=180):
     out = dict(ok=False, selected=False, verified=False)
@@ -295,15 +365,16 @@ def run(S, c, key, handle, *, value=None, match=None, choice_table=None, choice_
     c._io_deadline = min(deadline if deadline is not None else float('inf'), time.monotonic() + timeout)
     try:
         selector.prepare()
-        if match is not None or choice_table or choice_column or data_type or not selector.dropdown(value):
+        if match is not None or choice_table or choice_column or data_type or not selector.retry(
+                lambda: selector.dropdown(value)):
             selector.form(value, match, choice_table, choice_column, data_type)
         selector.verify(value, expected)
-        return selector.result
+        return dict(selector.result, attempts=selector.attempts)
     except Exception as exc:
         failure = (dict(code='selection_timeout', error='Selection timed out. Inspect the field and open choice window before retrying.')
                    if isinstance(exc, TimeoutError) else B.error(exc))
         return dict(selector.result, **failure, ok=False, selected=None if selector.selection_sent else False,
-                    stage=selector.stage, selection_sent=selector.selection_sent)
+                    stage=selector.stage, selection_sent=selector.selection_sent, attempts=selector.attempts)
     finally:
         c._io_deadline = deadline
         S._refs.for_client(c).remember(key, handle)

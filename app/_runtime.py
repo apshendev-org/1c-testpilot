@@ -15,6 +15,11 @@ import _field_batches as _batches
 import _snapshots
 import _form_context
 import _action_diagnostics
+import _dialogs
+import _admin_client
+import _client_registry
+import _effects
+import _typed_input
 import _row_search
 import _table_reading
 import _find_pages
@@ -1252,7 +1257,8 @@ def tc_connect(port: int, host: str = '127.0.0.1', version: str = None) -> str:
             try:
                 _code_execution.prepare(sys.modules[__name__], c, _state['_code_launch_path'], time.monotonic() + 120)
             except _code_execution.Failure as exc:
-                return _finish_client_launch(dict(exc.result))
+                if exc.result['code'] != 'helper_forbidden':
+                    return _finish_client_launch(dict(exc.result))
             except (OSError, RuntimeError) as exc:
                 return _finish_client_launch(dict(ok=False, code='helper_startup_failed', error=str(exc)))
         else:
@@ -1307,6 +1313,22 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
     and stops with the server. connect=false confirms only an answering port, not a usable client."""
     if desktop not in ('default', 'isolated'):
         return {'ok': False, 'code': 'invalid_desktop', 'error': 'desktop must be default or isolated.'}
+    reuse = _state.pop('_launch_reuse', None)
+    registry = _state.pop('_launch_registry', None)
+    listening = _state.pop('_launch_listening', None)
+    if reuse is not None:
+        # Живой клиент профиля из .testpilot-clients.json: подключение без нового процесса.
+        version = reuse.get('version') or version
+        out = {'ok': True, 'pid': reuse.get('pid'), 'port': reuse['port'], 'version': version, 'reused': True}
+        if connect:
+            out['connected'] = tc_connect(reuse['port'], version=version)
+            if _code_execution.launch_path(_state.get('_code_epf'), python_api=_execution.get() is not None):
+                # Обработка открыта прежним запуском: проверить, что она на месте, без повторного открытия.
+                try:
+                    out['execution_ready'] = _code_execution.discover(sys.modules[__name__], _state['client'])[0] is not None
+                except _code_execution.Failure as exc:
+                    out.update(exc.result, ok=True, execution_ready=False)
+        return out
     if desktop == 'isolated' and os.name != 'nt' and sys.platform != 'linux':
         return {'ok': False, 'code': 'isolated_desktop_unsupported',
                 'error': 'Isolated desktops are supported on Windows 10 or newer and Linux. Use desktop=default.'}
@@ -1394,6 +1416,11 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
     if not up:
         return _finish_client_launch({'ok': False, 'pid': proc.pid, 'desktop': desktop,
                 'error': 'the client did not start listening on port %d within %d s' % (port, wait)})
+    if registry is not None and _state.get('profile'):
+        _client_registry.record(registry, _state['profile'], port=port, pid=proc.pid, host='127.0.0.1',
+                                version=version)
+    if listening is not None:
+        listening()
     out = {'ok': True, 'pid': proc.pid, 'port': port, 'exe': exe, 'version': version, 'desktop': desktop}
     if connect:
         # порт открывается раньше, чем платформа проверила базу, поэтому ok=true по одному порту
@@ -1420,7 +1447,11 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
             _code_execution.prepare(sys.modules[__name__], _state['client'], helper_path, deadline)
             out['execution_ready'] = True
         except _code_execution.Failure as exc:
-            out.update(exc.result)
+            if exc.result['code'] == 'helper_forbidden':
+                # Ролевой пользователь без права на внешние обработки — нормальный случай (design Д).
+                out.update(execution_ready=False, execution_reason=exc.result['execution_reason'])
+            else:
+                out.update(exc.result)
         except (OSError, RuntimeError) as exc:
             out.update(ok=False, code='helper_startup_failed', error=str(exc))
     elif helper_path:
@@ -1510,6 +1541,9 @@ def tc_stop_client(graceful_timeout: float = 15) -> dict:
     _state.pop('launched_process', None)
     _state.pop('launched_port', None)
     _state.pop('_code_launch_path', None)
+    registry = _profiles.registry_file()
+    if registry is not None and _state.get('profile'):
+        _client_registry.forget(registry, _state['profile'], port)
     return {'ok': True, 'stopped_pid': pid, **shutdown}
 
 @_action('tc_session')
@@ -1555,9 +1589,24 @@ def tc_execute_code(code: str, context: typing.Literal['client', 'server'],
     0<timeout<=3600 seconds (default 180). Timeout does not cancel execution; the next call
     retrieves the pending result before accepting new code. Returned dates/references carry type
     information."""
-    return _code_execution.execute(sys.modules[__name__], _need(), mode='code', context=context,
-                                   code=code, parameters=parameters, timeout=timeout,
-                                   check_permissions=_execution.get() is None)
+    return _with_admin('execute_code', dict(code=code, context=context, parameters=parameters, timeout=timeout),
+                       lambda: _code_execution.execute(sys.modules[__name__], _need(), mode='code', context=context,
+                                                       code=code, parameters=parameters, timeout=timeout,
+                                                       check_permissions=_execution.get() is None))
+
+
+def _with_admin(action, arguments, run):
+    """Run in this client's processing; without it, in the admin client of the same base (design Д)."""
+    try:
+        return run()
+    except _code_execution.Failure as exc:
+        if exc.result.get('code') != 'helper_not_ready':
+            raise
+    if arguments.get('context') == 'client':
+        raise _code_execution.Failure('client_code_unavailable', 'This client has no Testpilot processing (its user may '
+                                      'not run external processing); client-context code runs only in its own session. '
+                                      'Use context="server": it runs in the admin client of the same base.')
+    return _admin_client.call(sys.modules[__name__], action, arguments)
 
 
 @_action('tc_run_compatible_scenario')
@@ -1596,9 +1645,10 @@ def tc_execute_query(query: str, parameters: dict = None, limit: int = 100, time
     РАЗРЕШЕННЫЕ is added if absent to the first ВЫБРАТЬ of each batch statement. limit=1..500 rows
     (default 100). Returns columns/rows/returned_rows/truncated; permissions affect results.
     0<timeout<=3600 seconds (default 180); timeout does not cancel the query."""
-    return _code_execution.execute(sys.modules[__name__], _need(), mode='query', context='server',
-                                   query=query, parameters=parameters, limit=limit, timeout=timeout,
-                                   check_permissions=_execution.get() is None)
+    return _with_admin('execute_query', dict(query=query, parameters=parameters, limit=limit, timeout=timeout),
+                       lambda: _code_execution.execute(sys.modules[__name__], _need(), mode='query', context='server',
+                                                       query=query, parameters=parameters, limit=limit, timeout=timeout,
+                                                       check_permissions=_execution.get() is None))
 
 @_action('tc_get_metadata')
 def tc_get_metadata(name: str = None, meta_type: str = None, search: str = None,
@@ -1612,8 +1662,11 @@ def tc_get_metadata(name: str = None, meta_type: str = None, search: str = None,
     Lists: limit 1..500, offset >= 0. timeout: maximum wait in seconds, 0 < timeout <= 3600."""
     from _service_metadata import metadata_options
     options = metadata_options(name, meta_type, search, field_search, sections, limit, offset)
-    return _code_execution.execute(sys.modules[__name__], _need(), mode='metadata', context='server',
-                                   options=options, timeout=timeout, check_permissions=_execution.get() is None)
+    return _with_admin('get_metadata', dict(name=name, meta_type=meta_type, search=search, field_search=field_search,
+                                            sections=sections, limit=limit, offset=offset, timeout=timeout),
+                       lambda: _code_execution.execute(sys.modules[__name__], _need(), mode='metadata', context='server',
+                                                       options=options, timeout=timeout,
+                                                       check_permissions=_execution.get() is None))
 
 
 @_action('tc_list_custom_bsl_functions')
@@ -1622,7 +1675,8 @@ def tc_list_custom_bsl_functions() -> dict:
     Returns their names, descriptions, execution contexts, parameters and result descriptions.
     Use execute_custom_bsl_function to run a listed function."""
     from _service_metadata import list_functions
-    return list_functions(sys.modules[__name__], _need(), check_permissions=_execution.get() is None)
+    return _with_admin('list_custom_bsl_functions', {},
+                       lambda: list_functions(sys.modules[__name__], _need(), check_permissions=_execution.get() is None))
 
 
 @_action('tc_execute_custom_bsl_function')
@@ -1633,9 +1687,10 @@ def tc_execute_custom_bsl_function(name: str, parameters: dict = None, timeout: 
     Parameters support JSON values and typed date/reference/enum objects, as in execute_code.
     timeout is the maximum wait in seconds (default 180), greater than 0 and at most 3600.
     A timeout does not cancel execution; the next execution call first reads the pending result."""
-    return _code_execution.execute(sys.modules[__name__], _need(), mode='function', context='server',
-                                   name=name, parameters=parameters, timeout=timeout,
-                                   check_permissions=_execution.get() is None)
+    return _with_admin('execute_custom_bsl_function', dict(name=name, parameters=parameters, timeout=timeout),
+                       lambda: _code_execution.execute(sys.modules[__name__], _need(), mode='function', context='server',
+                                                       name=name, parameters=parameters, timeout=timeout,
+                                                       check_permissions=_execution.get() is None))
 
 
 # ============================== журнал вызовов ===============================
@@ -1843,11 +1898,19 @@ def tc_input_text(key: str, text: str, handle: str, finish: bool = True) -> dict
     input; false keeps the edit buffer (e.g. for reference choice/cancel). Reference input may still
     require selection. Changed pending text causes pending_input_changed: re-enter or cancel.
     committed=true/false/null means accepted/pending/unverified; edit_finished means focus left;
-    changed compares displayed text. Numeric formatting may yield verification=numeric_equivalent
-    and committed=null. These flags do not confirm saving. For table cells use tc_set_cell_text;
+    changed compares displayed text. With the Testpilot processing the value is compared by the field
+    type: number numerically ("2" = "2,000", "2" != "20"), date as a date, boolean by value, string
+    exactly; without it the accepted text must equal text. A mismatch is ok=false, value_mismatch with
+    expected/actual. A reference field is filled by choosing the item whose presentation equals text
+    exactly; none or several give value_not_found/ambiguous_value with candidates. Prefixes never
+    match. These flags do not confirm saving. For table cells use tc_set_cell_text;
     finish text documents with activate on another element, spreadsheet cells with tc_doc
     end_edit_current_area."""
     c = _need()
+    typed = bool(finish and text and _key_class(key) == 'EditField' and '.Table[' not in key)
+    kind_before = _typed_input.field_value(sys.modules[__name__], c, key)[0] if typed else None
+    if kind_before == 'reference':
+        return _reference_input(c, key, handle, text)
     guid, middle = _input_text_command(text, c, key)
     ok = True
     try:
@@ -1882,10 +1945,41 @@ def tc_input_text(key: str, text: str, handle: str, finish: bool = True) -> dict
     result = {'ok': ok, 'target': key, 'text': text}
     # Input has already succeeded; completion and its diagnostic reads may raise.
     _remember_text_input(c, key, text, ok, handle=handle)
-    if ok and finish and text and _key_class(key) == 'EditField' and '.Table[' not in key:
+    if ok and typed:
         if _kind_of(c, key) == 'InputField':
             result.update(_finish_input_text(c, key, text, handle))
+            if result.get('ok') is not False and result.get('edit_finished') is True:
+                result.update(_typed_verdict(c, key, text, result.get('data_presentation')))
+                if result.get('message') is None:
+                    result.pop('message', None)
     _remember_text_input(c, key, text, ok, result)
+    return result
+
+
+def _typed_verdict(c, key, text, presentation):
+    """Compare the entered text with the field value by its type; exact text without the helper."""
+    kind, value = _typed_input.field_value(sys.modules[__name__], c, key)
+    verdict = _typed_input.matches(kind, text, value, _typed_input.service(c)) if kind else None
+    if verdict is None:
+        if presentation is None:
+            return {}
+        kind, value, verdict = None, presentation, presentation == text
+    if verdict:
+        return dict(committed=True, input_status='accepted', verification=kind or 'exact_text',
+                    message=None, value_kind=kind)
+    return dict(ok=False, code='value_mismatch', committed=False, input_status='rejected', value_kind=kind,
+                expected=text, actual=presentation if kind is None else value, data_presentation=presentation,
+                error='The field value differs from the entered text.', message=None)
+
+
+def _reference_input(c, key, handle, text):
+    """A reference field is filled by choosing the item whose presentation equals the text exactly."""
+    result = _value_selection.run(sys.modules[__name__], c, key, handle, value=text)
+    code = {'ambiguous_choice': 'ambiguous_value', 'choice_not_found': 'value_not_found'}.get(result.get('code'))
+    if code:
+        result = dict(result, code=code, candidates=result.get('candidates', []))
+    result.update(target=key, text=text, value_kind='reference', committed=bool(result.get('ok')),
+                  input_status='accepted' if result.get('ok') else 'rejected')
     return result
 
 
@@ -2040,12 +2134,20 @@ def _click_guid(key):
 
 
 @_action('tc_field')
-def tc_click(key: str, handle: str, diagnostics: bool = False, diagnostics_wait: float = 2.0) -> dict:
+def tc_click(key: str, handle: str, answer: str = None, expect: str = None, timeout: float = 10,
+             diagnostics: bool = False, diagnostics_wait: float = 2.0) -> dict:
     """Click a button, field, group, decoration or command-interface button.
     For submenus, find descendant Buttons and click them directly, even through nested menus;
     opening the menus first is unnecessary.
     Use activate to focus inputs/cells/pages. window, when present, is the active window afterwards.
     window_changed=false means the previous window description still applies.
+    ok=true only with a confirmed effect: standard commands Записать/Провести/...ИЗакрыть/Закрыть/ОК/
+    Выбрать/Создать by their meaning (effect saved/posted/closed/opened, ref), any other button by any
+    observed change (effect=changed, changes). The click waits up to timeout seconds and repeats once if
+    nothing changed at all. 1C messages or an error window fail at once. A modal question fails with
+    unexpected_dialog (question, buttons) unless answer names its button caption; then it is pressed
+    and the effect is still checked. effect_not_observed has expected, window, messages and snapshot
+    (form context file). expect="none" only for buttons without any observable effect.
     diagnostics=true also reads messages, possibly from earlier actions.
     diagnostics_wait=0..60 seconds polls while messages are unavailable/empty; 0 reads
     once. Individual requests use set_max_action_time. diagnostics.status is
@@ -2054,31 +2156,42 @@ def tc_click(key: str, handle: str, diagnostics: bool = False, diagnostics_wait:
     error = _action_diagnostics.validate(diagnostics, diagnostics_wait)
     if error:
         return dict(ok=False, code='invalid_argument', error=error)
+    if expect not in (None, 'none'):
+        return dict(ok=False, code='invalid_argument', error='expect accepts only "none".')
+    if answer is not None and (not isinstance(answer, str) or not answer.strip()):
+        return dict(ok=False, code='invalid_argument', error='answer must be a button caption.')
+    if type(timeout) not in (int, float) or not 0 <= timeout <= 600:
+        return dict(ok=False, code='invalid_argument', error='timeout must be from 0 to 600 seconds.')
     c = _need()
     guid = _click_guid(key)
     if guid is None:
         return {'ok': False, 'target': key, 'code': 'unsupported_element_type',
                 'error': 'Click requires a button, field, form group, decoration or command-interface button.',
                 'suggested_action': 'activate'}
-    mark = _native_composite_begin(c, 'click') if _key_class(key) == 'Group' else None
-    ok = True
-    try:
-        for kind in ('action', 'commit'):
-            r = c.send_cmd(guid, key, kind=kind, middle=b'', handle=handle)
-            ok = ok and r['ok']
-    except tc1c.OperationError as exc:
-        if exc.status == 8 and _key_class(key) == 'Group' and _kind_of(c, key) == 'Popup':
-            return dict(exc.result(), code='submenu_click_unsupported',
-                        error='Click cannot open this submenu. Use find_objects with this submenu '
-                              'as root_ref and cls="Button", then click the desired button directly. '
-                              'This includes nested submenus; opening the menus first is unnecessary.',
-                        suggested_action='find_objects')
-        raise
-    finally:
-        if mark is not None:
-            _native_composite_end(c, mark, 'click')
-    _state['window_key'] = None          # клик мог открыть новое окно — кэш недействителен
-    result = {'ok': ok, 'target': key}
+
+    def send():
+        mark = _native_composite_begin(c, 'click') if _key_class(key) == 'Group' else None
+        ok = True
+        try:
+            for kind in ('action', 'commit'):
+                r = c.send_cmd(guid, key, kind=kind, middle=b'', handle=handle)
+                ok = ok and r['ok']
+        except tc1c.OperationError as exc:
+            if exc.status == 8 and _key_class(key) == 'Group' and _kind_of(c, key) == 'Popup':
+                return dict(exc.result(), code='submenu_click_unsupported',
+                            error='Click cannot open this submenu. Use find_objects with this submenu '
+                                  'as root_ref and cls="Button", then click the desired button directly. '
+                                  'This includes nested submenus; opening the menus first is unnecessary.',
+                            suggested_action='find_objects')
+            raise
+        finally:
+            if mark is not None:
+                _native_composite_end(c, mark, 'click')
+        _state['window_key'] = None          # клик мог открыть новое окно — кэш недействителен
+        return {'ok': ok, 'target': key}
+
+    result = _effects.run(sys.modules[__name__], c, key, send, answer=answer, expect=expect, timeout=timeout)
+    ok = result.get('ok')
     if ok and (READBACK or diagnostics):
         result.update(_action_diagnostics.collect(sys.modules[__name__], c, diagnostics, diagnostics_wait))
     return result
@@ -3444,14 +3557,14 @@ def tc_choose_user_message(text: str, key: str = None, handle: str = None) -> di
     return {'ok': True}
 
 @_action('tc_window')
-def tc_answer_dialog(confirm: bool = True, timeout: int = 5) -> dict:
-    """Wait up to timeout seconds and answer a modal question: confirm=true presses Button0, false
-    Button1. Never presses Button2; inspect the question/window for other choices. Returns
-    answered='Да'/'Нет' and question; both null means no dialog, question alone null means
-    unreadable text."""
+def tc_answer_dialog(confirm: bool = True, timeout: int = 5, answer: str = None) -> dict:
+    """Wait for a modal dialog and press a button as soon as it appears. answer is a button
+    caption (Да, Нет, ОК, Отмена, ...); without it confirm=true presses Да/ОК, false Нет/Отмена.
+    Returns answered, question and dialog (question, buttons). No dialog within timeout seconds:
+    ok=false, code=no_dialog. Prefer click(answer=...) when the click itself opens the dialog."""
     c = _need()
-    ans, question = _answer_confirm_dialog(c, confirm, max_wait=max(timeout, 0))
-    return {'ok': True, 'answered': ans, 'question': question}
+    return _dialogs.answer(sys.modules[__name__], c, answer=answer, confirm=confirm,
+                           timeout=max(timeout, 0))
 
 @_action('tc_window')
 def tc_close_user_messages_panel(key: str = None, handle: str = None) -> dict:
@@ -3974,6 +4087,7 @@ def tc_select_value(key: str, handle: str, value: str = None, match: _value_sele
     choice_column limits value to a column title; data_type chooses a displayed type in the standard
     type dialog. expected checks accepted field text. Returns accepted value and verification.
     max_rows=1..10000; timeout is in seconds, 0<timeout<=3600, and covers the action.
+    A list step refused with unsupported_receiver is re-read and repeated until timeout; attempts counts tries.
     Failure leaves the UI and does not undo sent choices. Table cells use the current row and
     leave row editing open."""
     c = _need()
@@ -7519,6 +7633,7 @@ def _dispatch_action(acts, group, kw):
     profile = None
     helper_epf = None
     password_token = None
+    machine_lock = None
     try:
         if name not in acts:
             return _dispatch_connected_action(acts, group, kw)
@@ -7544,6 +7659,20 @@ def _dispatch_action(acts, group, kw):
                 raise _profiles.ProfileError('profile_only_setting', 'The processing path is set in the server settings or a launch profile.')
             args, profile = _profiles.resolve(name, args)
             helper_epf = args.pop('code_epf', None)
+            port_range = args.pop('port_range', None) if name == 'launch_client' else None
+            registry = _profiles.registry_file() if profile is not None and name == 'launch_client' else None
+            reuse = _client_registry.live(registry, profile) if registry is not None else None
+            if reuse is not None:
+                args['port'] = reuse['port']
+            elif port_range is not None and args.get('port') is None:
+                # Порт выбирается и занимается клиентом под общей блокировкой машины.
+                machine_lock = _client_registry.MachineLock(args.get('wait', 120)).acquire()
+                try:
+                    args['port'] = _client_registry.first_free(_client_registry.parse_range(port_range),
+                        exclude={c['port'] for c in _connection_pool().list() if c.get('port')})
+                except Exception:
+                    machine_lock.release()
+                    raise
             kw = {'action': name, **args}
             if profile is not None:
                 password_token = _profiles.PASSWORD.set(args.get('password'))
@@ -7552,7 +7681,7 @@ def _dispatch_action(acts, group, kw):
             params = bound.arguments
             launching = name == 'launch_client'
             connection = _connection_pool().reserve('127.0.0.1' if launching else params['host'], params['port'],
-                launch=launching, connection_id=connection_id,
+                launch=launching and reuse is None, connection_id=connection_id,
                 base=params.get('base'), user=params.get('user'))
             kw['port'] = connection.port
             if launching:
@@ -7571,6 +7700,9 @@ def _dispatch_action(acts, group, kw):
         with _connection_pool().use(connection, action=name):
             if name == 'launch_client':
                 _state['_code_epf'] = helper_epf
+                _state['_launch_reuse'] = reuse
+                _state['_launch_registry'] = registry
+                _state['_launch_listening'] = machine_lock.release if machine_lock is not None else None
             previous_profile = _state.get('profile')
             previous_client = _state.get('client')
             if profile is not None:
@@ -7587,11 +7719,13 @@ def _dispatch_action(acts, group, kw):
                     _state['profile'] = previous_profile
                 if name in ('connect', 'launch_client', 'disconnect', 'stop_client'):
                     _connection_pool().finish(connection)
-    except (_connections.ConnectionError, _profiles.ProfileError) as exc:
+    except (_connections.ConnectionError, _profiles.ProfileError, _client_registry.RegistryError) as exc:
         result = {'ok': False, 'code': exc.code, 'error': str(exc), **getattr(exc, 'details', {})}
         if exc.code in ('connection_required', 'connection_not_found', 'not_connected'):
             result['connections'] = _connection_pool().list()
         return _deliver(_profiles.redact(result))
     finally:
+        if machine_lock is not None:
+            machine_lock.release()
         if password_token is not None:
             _profiles.PASSWORD.reset(password_token)

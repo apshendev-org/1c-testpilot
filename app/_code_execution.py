@@ -16,16 +16,6 @@ import tc1c
 FORM_NAME = 'ВнешняяОбработка.Testpilot.Форма.Helper'
 FORM_NAMES = frozenset({FORM_NAME, 'ExternalDataProcessor.Testpilot.Form.Helper'})
 PROTOCOL = 1
-DEFAULT_FORBIDDEN = '''Удалить Delete Записать Write
-УстановитьПривилегированныйРежим SetPrivilegedMode
-ПодключитьВнешнююКомпоненту AttachAddIn УстановитьВнешнююКомпоненту InstallAddIn
-COMОбъект COMObject УстановитьМонопольныйРежим SetExclusiveMode
-УдалитьФайлы DeleteFiles КопироватьФайл CopyFile ПереместитьФайл MoveFile
-СоздатьКаталог CreateDirectory
-КомандаСистемы System ЗапуститьПриложение RunApp
-НачатьЗапускПриложения BeginRunningApplication
-ЗапуститьПриложениеАсинх RunAppAsync'''.split()
-ALWAYS_FORBIDDEN = {'выполнить', 'execute', 'вычислить', 'eval'}
 _internal = ContextVar('testpilot_service_access', default=None)
 
 
@@ -47,7 +37,6 @@ class Settings:
     code: bool
     query: bool
     epf: str
-    forbidden: frozenset
     metadata: str = 'auto'
     functions: bool = False
     form_details: str = 'auto'
@@ -68,12 +57,8 @@ def settings():
     metadata = os.environ.get('TC1C_METADATA', 'auto').strip().lower()
     if metadata not in ('auto', 'true', 'false'):
         raise ValueError('TC1C_METADATA must be auto, true or false')
-    words = lambda name: {w.casefold() for w in re.split(r'[,;\s]+', os.environ.get(name, '')) if w}
-    forbidden = ({w.casefold() for w in DEFAULT_FORBIDDEN} |
-                 words('TC1C_CODE_FORBIDDEN_WORDS')) - words('TC1C_CODE_ALLOWED_WORDS')
     return Settings(_flag('TC1C_CODE_EXECUTION'), _flag('TC1C_QUERY_EXECUTION'),
-                    os.environ.get('TC1C_CODE_EPF', '').strip(),
-                    frozenset(forbidden | ALWAYS_FORBIDDEN), metadata, _flag('TC1C_FUNCTIONS'), form_details)
+                    os.environ.get('TC1C_CODE_EPF', '').strip(), metadata, _flag('TC1C_FUNCTIONS'), form_details)
 
 
 SETTINGS = settings()
@@ -108,10 +93,9 @@ def tokens(text, *, bsl=True):
 def validate_code(code):
     if not isinstance(code, str) or not code.strip():
         raise Failure('invalid_code', 'code must be a nonempty string.')
-    for word, start, end in tokens(code):
-        if word in SETTINGS.forbidden:
-            raise Failure('forbidden_code', 'This identifier is forbidden by the execution policy.',
-                          identifier=code[start:end], line=_bsl_lines(code).count('\n', 0, start) + 1)
+    # Identifiers are not filtered: the 1C user's rights are the boundary. Only reject malformed text.
+    for _ in tokens(code):
+        pass
 
 
 def prepare_query(query):
@@ -218,15 +202,20 @@ def check_screenshot(client):
         guard(client, G.GET_ACTIVE_WINDOW, keys[0])
 
 
+def packaged_epf():
+    """Testpilot.epf installed with the package."""
+    from importlib.resources import files
+    return Path(str(files('testpilot_assets') / 'Testpilot.epf'))
+
+
 def launch_path(override=None, *, python_api=False):
+    """Processing to open with the client: override, TC1C_CODE_EPF, else the packaged file; '' disables it."""
     if not python_api and not SETTINGS.enabled:
         return None
+    if override == '':
+        return None
     value = override if override is not None else SETTINGS.epf
-    if not value:
-        if python_api:
-            return None
-        raise Failure('execution_not_configured', 'Configure the path to Testpilot.epf before launching the client.')
-    path = Path(value).expanduser().absolute()
+    path = Path(value).expanduser().absolute() if value else packaged_epf()
     if not path.is_file() or path.suffix.lower() != '.epf':
         raise Failure('execution_not_configured', 'The configured Testpilot.epf file is unavailable.')
     return str(path)
@@ -315,6 +304,11 @@ def discover(R, client, *, startup=False):
         return service, objects
 
 
+def forbidden(message):
+    # shortcut: только русский текст платформы 8.3.27; английский добавить, когда встретится живьём.
+    return 'запрещен запуск внешних обработок' in (message or '').lower()
+
+
 def prepare(R, client, path, deadline):
     """Only startup may approve the exact configured file; never an arbitrary dialog."""
     old_deadline = getattr(client, '_io_deadline', None)
@@ -370,8 +364,14 @@ def prepare(R, client, path, deadline):
                     if _configured_warning(message, path):
                         yes = [o for o in children if o.get('class') == 'Button' and o.get('title') in ('Да', 'Yes')]
                         if len(yes) == 1:
-                            _checked(R.tc_click(**_address(yes[0])))
+                            _checked(R.tc_click(**_address(yes[0]), expect='none'))
                             break
+                    if forbidden(message):
+                        buttons = [o for o in children if o.get('class') == 'Button']
+                        if len(buttons) == 1:
+                            _checked(R.tc_click(**_address(buttons[0]), expect='none'))
+                        raise Failure('helper_forbidden', 'The user may not run external processing; the client works '
+                                      'without it, code and checks go through the admin client.', execution_reason=message)
                     if message:
                         raise Failure('helper_startup_blocked', 'A startup dialog requires attention.', dialog=message)
             time.sleep(min(.2, max(0, deadline - time.monotonic())))
@@ -396,7 +396,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
             check_permissions=True, options=None, name=None):
     permitted = {'code': SETTINGS.code, 'query': SETTINGS.query,
                  'metadata': SETTINGS.metadata_enabled, 'function': SETTINGS.functions,
-                 'form_context': False, 'form_details': False}
+                 'form_context': False, 'form_details': False, 'form_state': False}
     if mode not in permitted:
         raise Failure('invalid_execution_mode', 'Unknown execution mode.')
     if check_permissions and not permitted[mode]:
@@ -405,7 +405,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
         raise Failure('execution_not_recordable', 'Finish XML scenario recording before using the Testpilot processing. Use Python tests for these calls.')
     if context not in ('client', 'server'):
         raise Failure('invalid_context', 'context must be client or server.')
-    if mode in ('form_context', 'form_details') and context != 'client':
+    if mode in ('form_context', 'form_details', 'form_state') and context != 'client':
         raise Failure('invalid_context', 'Form properties are read in the client context.')
     if type(timeout) not in (int, float) or not 0 < timeout <= 3600:
         raise Failure('invalid_timeout', 'timeout must be greater than zero and at most 3600 seconds.')
@@ -420,7 +420,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
     request_id = uuid.uuid4().hex
     request = dict(protocol=PROTOCOL, request_id=request_id, mode=mode, context=context,
                    code=code, query=query, parameters=parameters or {}, limit=limit)
-    if mode in ('metadata', 'form_context', 'form_details'):
+    if mode in ('metadata', 'form_context', 'form_details', 'form_state'):
         request['options'] = options
     if mode == 'function':
         request['name'] = name
@@ -476,10 +476,11 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
                 client._service_pending = None
                 return dict(ok=False, code='previous_execution_completed',
                             error='The previous execution completed. No new request was executed.', previous_result=response)
-            if mode in ('metadata', 'function', 'form_context', 'form_details'):
+            if mode in ('metadata', 'function', 'form_context', 'form_details', 'form_state'):
                 from _service_metadata import function_arguments
                 capability = {'metadata': 'metadata', 'function': 'custom_functions',
-                              'form_context': 'form_context', 'form_details': 'form_details'}[mode]
+                              'form_context': 'form_context', 'form_details': 'form_details',
+                              'form_state': 'form_state'}[mode]
                 if mode == 'metadata' and options and options.get('format') == 'tester':
                     capability = 'tester_metadata'
                 if capability not in service.get('capabilities', []):
@@ -541,3 +542,60 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
             vars(client).pop('RESYNC_TIMEOUT', None)
         else:
             client.RESYNC_TIMEOUT = old_resync
+
+
+def form_id(form_key):
+    """UUID of a ManagedForm key, as the helper identifies open forms."""
+    return form_key.rsplit('.ManagedForm[', 1)[-1].removesuffix(']') if '.ManagedForm[' in (form_key or '') else None
+
+
+def form_state(R, client, form_key, names=(), timeout=30):
+    """Modified flag, main object reference/posting and field values of an open form.
+
+    None when the helper or its form_state capability is unavailable: callers then rely
+    on UI observations only. Raises Failure for protocol errors of an available helper.
+    """
+    service = vars(client).get('_testpilot_service')
+    if service is None or 'form_state' not in service.get('capabilities', []):
+        return None
+    identifier = form_id(form_key)
+    if identifier is None:
+        return None
+    response = execute(R, client, mode='form_state', context='client',
+                       options=dict(form_id=identifier, items=list(names)), timeout=timeout, check_permissions=False)
+    if response.get('code') == 'previous_execution_completed':
+        response = execute(R, client, mode='form_state', context='client',
+                           options=dict(form_id=identifier, items=list(names)), timeout=timeout, check_permissions=False)
+    if not response.get('ok'):
+        raise Failure(response.get('code', 'helper_operation_failed'), response.get('error', 'Could not read the form state.'))
+    data = response.get('result')
+    if not isinstance(data, dict) or data.get('form_id') != identifier:
+        raise Failure('helper_protocol_error', 'The helper returned the state of a different form.')
+    if data.get('found') is False:
+        return dict(found=False)
+    values = {}
+    for item in data.get('items') or []:
+        if isinstance(item, dict) and isinstance(item.get('name'), str):
+            values[item['name']] = item.get('value')
+    obj = data.get('object') if isinstance(data.get('object'), dict) else None
+    return dict(found=True, modified=data.get('modified'), object=obj, values=values,
+                errors=data.get('errors') or [])
+
+
+def value_kind(value):
+    """Kind of a helper-prepared value: number, date, boolean, string, reference or empty."""
+    if value is None:
+        return 'empty'
+    if isinstance(value, bool):
+        return 'boolean'
+    if isinstance(value, (int, float)):
+        return 'number'
+    if isinstance(value, str):
+        return 'string'
+    if isinstance(value, dict):
+        kind = value.get('$type')
+        if kind == 'date':
+            return 'date'
+        if kind in ('ref', 'enum'):
+            return 'reference'
+    return 'other'

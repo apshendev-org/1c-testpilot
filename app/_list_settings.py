@@ -126,7 +126,7 @@ class Editor:
         if len(buttons) != 1:
             raise B.Failure('list_settings_unavailable', 'The list has no unambiguous standard settings command.')
         self.call('activate', target)
-        self.call('click', buttons[0])
+        self.call('click', buttons[0], expect='none')
         window = self.S._window(self.c)['key']
         objects = self.S._search_objects(self.c, window)
         finish = [o for o in objects if o.get('name') in ('ФормаЗакончитьРедактирование', 'FormFinishEditing')]
@@ -304,7 +304,7 @@ class Editor:
         # Put new filters at the root, not inside whichever group was last read.
         if section == 'filters': self.call('goto_first_row', table)
         self.changes_started = True
-        self.call('click', self.one(prefix + 'ДоступныеПоляВыбрать'))
+        self.call('click', self.one(prefix + 'ДоступныеПоляВыбрать'), expect='none')
         table, _ = self.section(section)
         after = self.read_section(section)
         added = fingerprint(after) - fingerprint(before)
@@ -337,7 +337,7 @@ class Editor:
         self.stage = 'apply' if apply else 'close'
         self.refresh()
         name = 'ФормаЗакончитьРедактирование' if apply else 'ФормаОтменитьРедактирование'
-        self.call('click', self.one(name))
+        self.call('click', self.one(name), expect='none')
         if self.exists(self.form):
             raise B.Failure('list_settings_still_open', 'The settings form is still open. Check its messages.')
         self.c._list_settings_editor = None

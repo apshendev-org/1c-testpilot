@@ -7,8 +7,11 @@ import subprocess
 def main():
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument('--exe', required=True, help='Full path to 1cv8.exe/1cv8 (Designer)')
-    parser.add_argument('--base', required=True, help='Existing file infobase used by Designer')
-    parser.add_argument('--output', default=str(Path(__file__).with_name('Testpilot.epf')))
+    parser.add_argument('--base', required=True, help='Existing file infobase used by Designer, or the infobase name with --server')
+    parser.add_argument('--server', help='1C server (host:port) of a server infobase --base')
+    parser.add_argument('--user', help='Infobase user, if the infobase has users')
+    parser.add_argument('--password', help='Password of --user')
+    parser.add_argument('--output', default=str(Path(__file__).resolve().parents[2] / 'app' / 'testpilot_assets' / 'Testpilot.epf'))
     args = parser.parse_args()
     root = Path(__file__).resolve().parent
     output = Path(args.output).absolute()
@@ -18,7 +21,10 @@ def main():
         startup = subprocess.STARTUPINFO()
         startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startup.wShowWindow = 0
-    completed = subprocess.run([args.exe, 'DESIGNER', '/F', str(Path(args.base).absolute()),
+    target = ['/S', f'{args.server}\\{args.base}'] if args.server else ['/F', str(Path(args.base).absolute())]
+    if args.user:
+        target += ['/N', args.user] + (['/P', args.password] if args.password else [])
+    completed = subprocess.run([args.exe, 'DESIGNER', *target,
         '/LoadExternalDataProcessorOrReportFromFiles', str(root / 'src/Testpilot.xml'), str(output),
         '/Out', str(log), '/DisableStartupDialogs', '/DisableStartupMessages'],
         startupinfo=startup, timeout=120)

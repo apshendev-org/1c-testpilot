@@ -9,7 +9,7 @@ import yaml
 
 PASSWORD = ContextVar('testpilot_profile_password', default=None)
 MAX_BYTES = 1024 * 1024
-LAUNCH = {'base', 'port', 'server', 'user', 'password', 'password_env', 'version',
+LAUNCH = {'base', 'port', 'port_range', 'server', 'user', 'password', 'password_env', 'version',
           'exe', 'extra_args', 'wait', 'connect', 'desktop', 'code_epf'}
 CONNECT = {'host', 'port', 'version'}
 
@@ -61,6 +61,9 @@ def validate(name, config):
             valid = type(value) is bool
         elif key == 'port':
             valid = type(value) is int and 1 <= value <= 65535
+        elif key == 'port_range':
+            from _client_registry import parse_range
+            valid = parse_range(value) is not None
         elif key == 'wait':
             valid = type(value) is int and value > 0
         elif key == 'extra_args':
@@ -126,6 +129,7 @@ def listing():
         result.append(dict(name=name, description=config.get('description', ''), action=action,
                            base=config.get('base'), user=config.get('user'),
                            host=config.get('host', '127.0.0.1'), port=config.get('port'),
+                           port_range=config.get('port_range'),
                            version=config.get('version'),
                            desktop=config.get('desktop', 'default') if action == 'launch_client' else None))
     return {'ok': True, 'profiles': result, 'configured': path is not None}
@@ -171,3 +175,24 @@ def redact(value, *, diagnostic=True):
     if isinstance(value, list):
         return [redact(v, diagnostic=diagnostic) for v in value]
     return value
+
+
+def registry_file():
+    """.testpilot-clients.json next to the profiles file, or None without profiles."""
+    filename = os.environ.get('TC1C_PROFILES_FILE', '').strip()
+    if not filename:
+        return None
+    from _client_registry import path
+    return path(Path(filename).expanduser().absolute())
+
+
+def find(user, like):
+    """Profile names with this user and the same base/server as profile `like`."""
+    profiles, _ = load()
+    if like not in profiles:
+        raise ProfileError('profile_not_found', 'Unknown profile; use list_profiles.')
+    base = profiles[like]
+    found = [name for name, config in profiles.items()
+             if config.get('user') == user and config.get('base') == base.get('base')
+             and bool(config.get('server', False)) == bool(base.get('server', False))]
+    return found
