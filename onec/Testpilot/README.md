@@ -280,7 +280,7 @@ XML-сценария выполнение отклоняется: формат X
 ```powershell
 python onec/Testpilot/build.py --exe "C:/Program Files/1cv8/8.3.27.1936/bin/1cv8.exe" --base "D:/Bases/Build"
 # серверная база
-python onec/Testpilot/build.py --exe "C:/Program Files/1cv8/8.3.27.1936/bin/1cv8.exe" --server "srv:1541" --base "build-ib"
+python onec/Testpilot/build.py --exe "C:/Program Files/1cv8/8.3.27.1936/bin/1cv8.exe" --server "srv:1541" --base "build-ib" --user "Администратор"
 ```
 
 Сборка использует конфигуратор установленной платформы и существующую файловую
