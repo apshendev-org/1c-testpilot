@@ -21,7 +21,7 @@ print('sspi used:', tc1c.sspi is not None)
 client = Client()
 t = time.monotonic()
 try:
-    print('connect:', client.connect(host=host, port=port), f'{time.monotonic() - t:.1f}s')
+    print('connect:', client.connect(host=host, port=port, version='8.3.27.2342'), f'{time.monotonic() - t:.1f}s')
     window = client.call('get_active_window', check=False)
     print('active window:', {k: window.get(k) for k in ('ok', 'title', 'code', 'error')})
 except ActionError as exc:
