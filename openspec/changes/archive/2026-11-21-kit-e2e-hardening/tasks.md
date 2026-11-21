@@ -59,7 +59,7 @@
 
 - [x] 10.1 Перенести `Testpilot.epf` в `app/testpilot_assets/` (`git mv`), `package-data`, путь по умолчанию через `importlib.resources`, `build.py` пишет туда же. Проверка: wheel из `uv build` содержит `testpilot_assets/Testpilot.epf`; unit-тест пути по умолчанию и `code_epf=""`.
 - [x] 10.2 Обновить ссылки на путь в документации и `profiles.example.yaml`; пункт синхронизации с апстримом в README форка. Проверка: grep `onec/Testpilot/Testpilot.epf` вне `openspec/` — только пункт синхронизации.
-- [x] 10.3 Версия `1.9.2.post3` в `pyproject.toml`. Проверка: `uv build` создаёт `1c_testpilot-1.9.2.post3`.
+- [x] 10.3 Версия `1.10.0` в `pyproject.toml`. Проверка: `uv build` создаёт `1c_testpilot-1.10.0`.
 
 ## 11. Интеграционная проверка
 
@@ -78,5 +78,5 @@
 
 ## Workflow follow-up
 
-- Слить PR в `fork` и выпустить тег `v1.9.2.post3` только после ок владельца.
+- Слить PR в `fork` и выпустить тег `v1.10.0` только после ок владельца.
 - После слияния архивировать изменение (`openspec archive kit-e2e-hardening`) и проверить, что спецификации появились в `openspec/specs/`.
