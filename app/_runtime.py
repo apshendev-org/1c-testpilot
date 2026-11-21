@@ -1316,9 +1316,16 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
     listening = _state.pop('_launch_listening', None)
     if reuse is not None:
         # Живой клиент профиля из .testpilot-clients.json: подключение без нового процесса.
-        out = {'ok': True, 'pid': reuse.get('pid'), 'port': reuse['port'], 'reused': True}
+        version = reuse.get('version') or version
+        out = {'ok': True, 'pid': reuse.get('pid'), 'port': reuse['port'], 'version': version, 'reused': True}
         if connect:
-            out['connected'] = tc_connect(reuse['port'], version=reuse.get('version') or version)
+            out['connected'] = tc_connect(reuse['port'], version=version)
+            if _code_execution.launch_path(_state.get('_code_epf'), python_api=_execution.get() is not None):
+                # Обработка открыта прежним запуском: проверить, что она на месте, без повторного открытия.
+                try:
+                    out['execution_ready'] = _code_execution.discover(sys.modules[__name__], _state['client'])[0] is not None
+                except _code_execution.Failure as exc:
+                    out.update(exc.result, ok=True, execution_ready=False)
         return out
     if desktop == 'isolated' and os.name != 'nt' and sys.platform != 'linux':
         return {'ok': False, 'code': 'isolated_desktop_unsupported',

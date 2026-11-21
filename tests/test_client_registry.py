@@ -151,8 +151,11 @@ def test_launch_reuses_live_client_of_profile(tmp_path, monkeypatch):
     monkeypatch.setattr(CR, 'alive', lambda entry: True)
     connected = []
     monkeypatch.setattr(R, 'tc_connect', lambda port, version=None: connected.append((port, version)) or 'connected')
+    monkeypatch.setitem(R._state, 'client', object())
+    monkeypatch.setattr(R._code_execution, 'discover', lambda runtime, client: ({'form': {}}, []))
     result = R.Runtime().call('launch_client', {'profile': 'роль:kassir'})
     assert result['ok'] and result['reused'] is True and result['port'] == 30005
+    assert result['version'] == '8.3.27.1859' and result['execution_ready'] is True
     assert result['profile'] == 'роль:kassir' and connected == [(30005, '8.3.27.1859')]
 
 

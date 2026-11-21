@@ -1,0 +1,23 @@
+# Образец: base — сервер и имя своей dev-ИБ (копия эталона 1c_exts из пула кита).
+profiles:
+  ib:
+    base: 'server1c:1541\exts-dev-ib-1'
+    server: true
+    user: Администратор
+    password: ''
+    version: '8.3.27.2342'
+    port_range: '30000-30999'
+  'роль:Пользователь':
+    base: 'server1c:1541\exts-dev-ib-1'
+    server: true
+    user: Пользователь
+    password: ''
+    version: '8.3.27.2342'
+    port_range: '30000-30999'
+  'роль:Руководитель':
+    base: 'server1c:1541\exts-dev-ib-1'
+    server: true
+    user: Руководитель
+    password: ''
+    version: '8.3.27.2342'
+    port_range: '30000-30999'
