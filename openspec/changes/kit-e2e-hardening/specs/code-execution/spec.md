@@ -31,3 +31,18 @@
 #### Scenario: Незакрытая строка
 - **WHEN** код содержит `Х = "abc;`
 - **THEN** ответ `ok: false`, `code: invalid_code`
+
+### Requirement: Клиент без обработки исполняет через админ-клиент
+Для клиента без обработки Testpilot серверный код, запросы, метаданные и пользовательские функции MUST выполняться через админ-клиент той же базы (`base`, `server`): профиль, назначенный вызывающим (pytest — `--tc-profile`), иначе `ib`. Неподключённый админ-клиент MUST подниматься движком по профилю с переиспользованием по `.testpilot-clients.json`. Ответ MUST содержать `delegated_to`. Код в контексте `client` MUST NOT делегироваться.
+
+#### Scenario: Запрос из ролевого клиента
+- **WHEN** тест под `роль:kfk_user` без обработки вызывает `execute_query`
+- **THEN** запрос выполняется админ-клиентом `ib`, ответ содержит строки и `delegated_to: "ib"`
+
+#### Scenario: Админ-клиента нет
+- **WHEN** у клиента без обработки нет профиля `ib` той же базы
+- **THEN** ответ `ok: false`, `code: admin_client_unavailable`, `profile: "ib"`
+
+#### Scenario: Клиентский код
+- **WHEN** клиент без обработки вызывает `execute_code` с `context: "client"`
+- **THEN** ответ `ok: false`, `code: client_code_unavailable`
