@@ -13,7 +13,8 @@ TC1C_QUERY_EXECUTION=true
 TC1C_METADATA=auto
 TC1C_FUNCTIONS=false
 TC1C_FORM_DETAILS=auto
-TC1C_CODE_EPF=onec/Testpilot/Testpilot.epf
+# Необязательно: без TC1C_CODE_EPF открывается обработка из установленного пакета.
+# TC1C_CODE_EPF=D:/Tools/Testpilot.epf
 ```
 
 Код, запросы и пользовательские функции включаются независимо. Метаданные в режиме
@@ -268,7 +269,8 @@ XML-сценария выполнение отклоняется: формат X
 
 ## Исходники и сборка
 
-Готовая обработка: [Testpilot.epf](Testpilot.epf). Исходники: [src](src).
+Готовая обработка входит в пакет: [app/testpilot_assets/Testpilot.epf](../../app/testpilot_assets/Testpilot.epf),
+`build.py` по умолчанию пишет туда же. Исходники: [src](src).
 Требуется управляемое приложение. Обработка использует `ЧтениеJSON`, `ЗаписьJSON`,
 `ПрочитатьJSON` и `ЗаписатьJSON`, появившиеся в
 [8.3.6.1977](https://wonderland.v8.1c.ru/blog/sredstva-raboty-s-json/).

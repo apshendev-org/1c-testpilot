@@ -8,7 +8,7 @@ def main():
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument('--exe', required=True, help='Full path to 1cv8.exe/1cv8 (Designer)')
     parser.add_argument('--base', required=True, help='Existing file infobase used by Designer')
-    parser.add_argument('--output', default=str(Path(__file__).with_name('Testpilot.epf')))
+    parser.add_argument('--output', default=str(Path(__file__).resolve().parents[2] / 'app' / 'testpilot_assets' / 'Testpilot.epf'))
     args = parser.parse_args()
     root = Path(__file__).resolve().parent
     output = Path(args.output).absolute()

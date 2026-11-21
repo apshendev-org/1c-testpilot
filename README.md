@@ -283,6 +283,13 @@ pytest и MCP с тем же профилем подключаются к это
 нет — код 0 и `"stopped": false`; процесс не `1cv8*` — отказ `not_a_test_client`. Без команды
 `1c-testpilot` запускает MCP-сервер, как раньше; `--env-file` действует для всех вариантов.
 
+### Обработка Testpilot.epf в пакете (форк)
+
+В форке `Testpilot.epf` лежит в `app/testpilot_assets/` и входит в wheel. Без `code_epf` и
+`TC1C_CODE_EPF` клиент открывает файл из установленного пакета; `code_epf=""` запускает клиент
+без обработки. Синхронизация с апстримом: если апстрим меняет `onec/Testpilot/Testpilot.epf`,
+перенесите файл в `app/testpilot_assets/Testpilot.epf` (или пересоберите `onec/Testpilot/build.py`).
+
 ## Переменные окружения
 
 Задаются в окружении процесса сервера или в файле по образцу [.env.example](.env.example):

@@ -1,6 +1,6 @@
 [project]
 name = "1c-testpilot"
-version = "1.9.2.post2"
+version = "1.9.2.post3"
 description = "MCP-сервер для управления тест-клиентом 1С:Предприятие"
 readme = "README.md"
 license = "AGPL-3.0-only"
@@ -46,4 +46,7 @@ py-modules = ["server", "_runtime", "_client_shutdown", "_mcp", "testpilot", "te
 
 [tool.setuptools.packages.find]
 where = ["app"]
-include = ["compatible_scenarios*"]
+include = ["compatible_scenarios*", "testpilot_assets"]
+
+[tool.setuptools.package-data]
+testpilot_assets = ["*.epf"]

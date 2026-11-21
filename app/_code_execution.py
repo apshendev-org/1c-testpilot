@@ -202,15 +202,20 @@ def check_screenshot(client):
         guard(client, G.GET_ACTIVE_WINDOW, keys[0])
 
 
+def packaged_epf():
+    """Testpilot.epf installed with the package."""
+    from importlib.resources import files
+    return Path(str(files('testpilot_assets') / 'Testpilot.epf'))
+
+
 def launch_path(override=None, *, python_api=False):
+    """Processing to open with the client: override, TC1C_CODE_EPF, else the packaged file; '' disables it."""
     if not python_api and not SETTINGS.enabled:
         return None
+    if override == '':
+        return None
     value = override if override is not None else SETTINGS.epf
-    if not value:
-        if python_api:
-            return None
-        raise Failure('execution_not_configured', 'Configure the path to Testpilot.epf before launching the client.')
-    path = Path(value).expanduser().absolute()
+    path = Path(value).expanduser().absolute() if value else packaged_epf()
     if not path.is_file() or path.suffix.lower() != '.epf':
         raise Failure('execution_not_configured', 'The configured Testpilot.epf file is unavailable.')
     return str(path)

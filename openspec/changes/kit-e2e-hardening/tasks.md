@@ -57,9 +57,9 @@
 
 ## 10. Поставка Testpilot.epf и версия
 
-- [ ] 10.1 Перенести `Testpilot.epf` в `app/testpilot_assets/` (`git mv`), `package-data`, путь по умолчанию через `importlib.resources`, `build.py` пишет туда же. Проверка: wheel из `uv build` содержит `testpilot_assets/Testpilot.epf`; unit-тест пути по умолчанию и `code_epf=""`.
-- [ ] 10.2 Обновить ссылки на путь в документации и `profiles.example.yaml`; пункт синхронизации с апстримом в README форка. Проверка: grep `onec/Testpilot/Testpilot.epf` вне `openspec/` — только пункт синхронизации.
-- [ ] 10.3 Версия `1.9.2.post3` в `pyproject.toml`. Проверка: `uv build` создаёт `1c_testpilot-1.9.2.post3`.
+- [x] 10.1 Перенести `Testpilot.epf` в `app/testpilot_assets/` (`git mv`), `package-data`, путь по умолчанию через `importlib.resources`, `build.py` пишет туда же. Проверка: wheel из `uv build` содержит `testpilot_assets/Testpilot.epf`; unit-тест пути по умолчанию и `code_epf=""`.
+- [x] 10.2 Обновить ссылки на путь в документации и `profiles.example.yaml`; пункт синхронизации с апстримом в README форка. Проверка: grep `onec/Testpilot/Testpilot.epf` вне `openspec/` — только пункт синхронизации.
+- [x] 10.3 Версия `1.9.2.post3` в `pyproject.toml`. Проверка: `uv build` создаёт `1c_testpilot-1.9.2.post3`.
 
 ## 11. Интеграционная проверка
 

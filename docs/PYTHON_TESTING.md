@@ -486,7 +486,7 @@ pytest-тестов действия и проверки можно писать
 profiles:
   demo:
     base: 'D:/Bases/Demo'
-    code_epf: 'D:/Tools/1c-testpilot/onec/Testpilot/Testpilot.epf'
+    code_epf: 'D:/Tools/Testpilot.epf'   # необязательно: без него — обработка из пакета
 ```
 
 При запуске профиля обработка автоматически открывается и проверяется на готовность.
@@ -504,7 +504,7 @@ from testpilot import Client
 with Client() as client:
     client.launch_client(
         base="D:/Bases/Demo",
-        code_epf="D:/Tools/1c-testpilot/onec/Testpilot/Testpilot.epf",
+        code_epf="D:/Tools/Testpilot.epf",  # необязательно; code_epf="" — без обработки
     )
     assert client.execute_query(query="ВЫБРАТЬ 1 КАК Число")["rows"] == [{"Число": 1}]
 ```

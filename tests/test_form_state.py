@@ -53,3 +53,12 @@ def test_closed_form_and_foreign_form(monkeypatch):
 ])
 def test_value_kind(value, kind):
     assert ce.value_kind(value) == kind
+
+
+def test_packaged_processing_is_the_default(monkeypatch):
+    import dataclasses
+    monkeypatch.setattr(ce, 'SETTINGS', dataclasses.replace(ce.SETTINGS, epf=''))
+    path = ce.packaged_epf()
+    assert path.is_file() and path.name == 'Testpilot.epf' and path.parent.name == 'testpilot_assets'
+    assert ce.launch_path(None, python_api=True) == str(path)
+    assert ce.launch_path('', python_api=True) is None
