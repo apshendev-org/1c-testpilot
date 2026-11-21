@@ -127,3 +127,37 @@ def test_changed_value_stops_repeating(monkeypatch):
     monkeypatch.setattr(V, '_RETRY_PAUSE', 0.01)
     selector, stub, calls = flaky(5, field=lambda: '1С:Бухгалтерия 8')
     assert selector.retry(lambda: selector.dropdown('1С:Бухгалтерия 8')) == 'changed' and len(calls) == 1
+
+
+def choice_form(search_result):
+    """Choice form whose value is hidden in a group until the list search string is used."""
+    searched = []
+    S = SimpleNamespace(_cell_window=lambda c, expected=None: 'Choice', _read_open_windows=lambda c: [],
+                        _list_search=SimpleNamespace(run=lambda S, c, key, handle, text, **kw:
+                                                     searched.append(text) or search_result))
+    selector = V.Selector(S, SimpleNamespace(_io_deadline=None), 'F.EditField[Номенклатура]', 'h', 500)
+    selector.origin = 'Form'
+    table = dict(key='Choice.ManagedForm[c].Table[Список]', handle='t')
+    selector.call = lambda action, obj, **kw: dict(ok=True)
+    selector.objects = lambda: [table]
+    selector.table_for = lambda objects, name: table
+
+    def locate(table, match, value, column):
+        if not searched:
+            raise B.Failure('choice_not_found', 'No exact value.', details={'candidates': []})
+        return {'Наименование': value}
+    selector.locate = locate
+    return selector, searched
+
+
+def test_value_inside_group_is_found_by_list_search():
+    selector, searched = choice_form(dict(ok=True))
+    selector.form('1С:Бухгалтерия 8', None, None, None, None)
+    assert searched == ['1С:Бухгалтерия 8'] and selector.result['matched_row'] == {'Наименование': '1С:Бухгалтерия 8'}
+
+
+def test_unavailable_list_search_keeps_not_found():
+    selector, searched = choice_form(dict(ok=False, code='search_field_unavailable', error='no search'))
+    with pytest.raises(B.Failure) as error:
+        selector.form('1С:Бухгалтерия 8', None, None, None, None)
+    assert error.value.code == 'choice_not_found' and error.value.details['search']['code'] == 'search_field_unavailable'

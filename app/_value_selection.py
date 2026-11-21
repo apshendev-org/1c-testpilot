@@ -216,6 +216,15 @@ class Selector:
                 raise B.Failure('choice_changed', 'The current row no longer matches the requested values.')
         return found[0]
 
+    def search(self, table, value, failure):
+        self.stage = 'search_choice'
+        self.result['searched'] = True
+        found = self.S._list_search.run(self.S, self.c, table['key'], table['handle'], value,
+                                        max_rows=self.max_rows, settle_time=0.5)
+        if not found.get('ok'):
+            failure.details['search'] = {k: found.get(k) for k in ('code', 'error')}
+            raise failure
+
     def form(self, value, match, choice_table, choice_column, data_type):
         self.stage = 'open_choice'
         self.call('start_choosing', self.source)
@@ -263,7 +272,14 @@ class Selector:
         table = self.table_for(objects, choice_table)
 
         def choose():
-            row = self.locate(table, match, value, choice_column)
+            try:
+                row = self.locate(table, match, value, choice_column)
+            except B.Failure as exc:
+                # Иерархический список показывает верхний уровень: ищем строкой поиска списка, как человек.
+                if exc.code != 'choice_not_found' or match is not None or self.result.get('searched'):
+                    raise
+                self.search(table, value, exc)
+                row = self.locate(table, match, value, choice_column)
             self.stage = 'choose_row'
             self.active(self.window)
             self.selection_sent = True
