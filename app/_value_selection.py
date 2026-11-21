@@ -104,7 +104,9 @@ class Selector:
             raise B.Failure('choice_list_unavailable', 'The open choice list could not be read.')
         indexes = [i for i, v in enumerate(values) if v == value]
         if len(indexes) > 1:
-            raise B.Failure('ambiguous_choice', 'Several choices have this exact text. Use match to select through the choice form.')
+            items = choices.get('items') or []
+            raise B.Failure('ambiguous_choice', 'Several choices have this exact text. Use match to select through the choice form.',
+                            details={'candidates': [items[i] if len(items) == len(values) else values[i] for i in indexes]})
         if not indexes:
             self.call('close_drop_list', self.source)
             if self.call('drop_list_is_open', self.source).get('open') is not False:
@@ -155,7 +157,8 @@ class Selector:
                 if len(candidates) > 1:
                     raise B.Failure('ambiguous_choice_column', 'The value occurs in several columns. Specify choice_column or match.')
                 if not candidates:
-                    raise B.Failure('choice_not_found', 'No exact value was found in the selectable rows of this choice table.')
+                    raise B.Failure('choice_not_found', 'No exact value was found in the selectable rows of this choice table.',
+                                    details={'candidates': similar(rows, value)})
                 column = next(iter(candidates))
             match = {column: value}
         for name in match:
@@ -167,7 +170,9 @@ class Selector:
         if len(found) != 1:
             raise B.Failure('ambiguous_choice' if found else 'choice_not_found',
                             'Several rows match. Add distinguishing columns.' if found else
-                            'No exact match in the selectable rows of this choice table.', details={'match_count': len(found)})
+                            'No exact match in the selectable rows of this choice table.',
+                            details={'match_count': len(found),
+                                     'candidates': found[:20] if found else similar(rows, ' '.join(match.values()))})
         # GotoRow treats * and ? as patterns. Never turn literal user input into a wildcard selection.
         if any('*' in v or '?' in v for v in match.values()):
             raise B.Failure('unsupported_choice_text', 'Choice-form positioning does not support literal * or ?. Use other distinguishing columns.')
@@ -265,6 +270,12 @@ class Selector:
                            verification=('exact_text' if actual == wanted else 'selected_item_value')
                            if wanted is not None else 'choice_closed_and_value_read',
                            changed=actual != self.result['value_before'] if self.result['value_before'] is not None else None)
+
+
+def similar(rows, value, limit=20):
+    """Rows whose displayed text contains the value: hints for a failed exact choice."""
+    wanted = (value or '').casefold()
+    return [row for row in rows if wanted and any(wanted in text(v).casefold() for v in row.values())][:limit]
 
 
 def validate_options(*, value=None, match=None, choice_table=None, choice_column=None,

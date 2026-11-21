@@ -17,6 +17,7 @@ import _form_context
 import _action_diagnostics
 import _dialogs
 import _effects
+import _typed_input
 import _row_search
 import _table_reading
 import _find_pages
@@ -1845,11 +1846,19 @@ def tc_input_text(key: str, text: str, handle: str, finish: bool = True) -> dict
     input; false keeps the edit buffer (e.g. for reference choice/cancel). Reference input may still
     require selection. Changed pending text causes pending_input_changed: re-enter or cancel.
     committed=true/false/null means accepted/pending/unverified; edit_finished means focus left;
-    changed compares displayed text. Numeric formatting may yield verification=numeric_equivalent
-    and committed=null. These flags do not confirm saving. For table cells use tc_set_cell_text;
+    changed compares displayed text. With the Testpilot processing the value is compared by the field
+    type: number numerically ("2" = "2,000", "2" != "20"), date as a date, boolean by value, string
+    exactly; without it the accepted text must equal text. A mismatch is ok=false, value_mismatch with
+    expected/actual. A reference field is filled by choosing the item whose presentation equals text
+    exactly; none or several give value_not_found/ambiguous_value with candidates. Prefixes never
+    match. These flags do not confirm saving. For table cells use tc_set_cell_text;
     finish text documents with activate on another element, spreadsheet cells with tc_doc
     end_edit_current_area."""
     c = _need()
+    typed = bool(finish and text and _key_class(key) == 'EditField' and '.Table[' not in key)
+    kind_before = _typed_input.field_value(sys.modules[__name__], c, key)[0] if typed else None
+    if kind_before == 'reference':
+        return _reference_input(c, key, handle, text)
     guid, middle = _input_text_command(text, c, key)
     ok = True
     try:
@@ -1884,10 +1893,41 @@ def tc_input_text(key: str, text: str, handle: str, finish: bool = True) -> dict
     result = {'ok': ok, 'target': key, 'text': text}
     # Input has already succeeded; completion and its diagnostic reads may raise.
     _remember_text_input(c, key, text, ok, handle=handle)
-    if ok and finish and text and _key_class(key) == 'EditField' and '.Table[' not in key:
+    if ok and typed:
         if _kind_of(c, key) == 'InputField':
             result.update(_finish_input_text(c, key, text, handle))
+            if result.get('ok') is not False and result.get('edit_finished') is True:
+                result.update(_typed_verdict(c, key, text, result.get('data_presentation')))
+                if result.get('message') is None:
+                    result.pop('message', None)
     _remember_text_input(c, key, text, ok, result)
+    return result
+
+
+def _typed_verdict(c, key, text, presentation):
+    """Compare the entered text with the field value by its type; exact text without the helper."""
+    kind, value = _typed_input.field_value(sys.modules[__name__], c, key)
+    verdict = _typed_input.matches(kind, text, value, _typed_input.service(c)) if kind else None
+    if verdict is None:
+        if presentation is None:
+            return {}
+        kind, value, verdict = None, presentation, presentation == text
+    if verdict:
+        return dict(committed=True, input_status='accepted', verification=kind or 'exact_text',
+                    message=None, value_kind=kind)
+    return dict(ok=False, code='value_mismatch', committed=False, input_status='rejected', value_kind=kind,
+                expected=text, actual=presentation if kind is None else value, data_presentation=presentation,
+                error='The field value differs from the entered text.', message=None)
+
+
+def _reference_input(c, key, handle, text):
+    """A reference field is filled by choosing the item whose presentation equals the text exactly."""
+    result = _value_selection.run(sys.modules[__name__], c, key, handle, value=text)
+    code = {'ambiguous_choice': 'ambiguous_value', 'choice_not_found': 'value_not_found'}.get(result.get('code'))
+    if code:
+        result = dict(result, code=code, candidates=result.get('candidates', []))
+    result.update(target=key, text=text, value_kind='reference', committed=bool(result.get('ok')),
+                  input_status='accepted' if result.get('ok') else 'rejected')
     return result
 
 
