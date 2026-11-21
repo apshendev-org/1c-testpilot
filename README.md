@@ -264,6 +264,25 @@ codex mcp add 1c-testpilot --url http://127.0.0.1:6004/mcp
 Для MCP достаточно одного stdio-сервера на дерево с `TC1C_PROFILES_FILE`: профиль передаётся
 в `launch_client`, у каждого профиля своё подключение (`connection_id`).
 
+### Запуск клиента из командной строки
+
+`1c-testpilot client start --profile <имя>` запускает клиент по профилю (порт — из `port_range`
+или `port`), открывает `Testpilot.epf`, подтверждает предупреждение безопасности, ждёт
+готовности, отключается и оставляет процесс 1С работать. В stdout — JSON:
+
+```json
+{"ok": true, "profile": "роль:kfk_user", "pid": 4242, "host": "127.0.0.1", "port": 30001,
+ "version": "8.3.27.1859", "execution_ready": true, "reused": false}
+```
+
+Если клиент профиля уже работает, новый процесс не запускается, `reused: true`. Неудачная
+подготовка завершает запущенный процесс, код выхода 1, JSON с `code` и `error` — в stderr.
+pytest и MCP с тем же профилем подключаются к этому клиенту по `.testpilot-clients.json`.
+
+`1c-testpilot client stop --profile <имя>` или `--pid <pid>` завершает клиент. Процесса уже
+нет — код 0 и `"stopped": false`; процесс не `1cv8*` — отказ `not_a_test_client`. Без команды
+`1c-testpilot` запускает MCP-сервер, как раньше; `--env-file` действует для всех вариантов.
+
 ## Переменные окружения
 
 Задаются в окружении процесса сервера или в файле по образцу [.env.example](.env.example):

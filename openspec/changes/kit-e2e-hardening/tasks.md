@@ -52,8 +52,8 @@
 
 ## 9. CLI запуска клиента
 
-- [ ] 9.1 `1c-testpilot client start|stop` по `specs/client-launch-cli` с пулом портов и файлом состояния; без подкоманды — MCP-сервер. Проверка: unit-тесты на фейковом `Client`: JSON и `disconnect` вместо `close`, остановка при неудаче, повторный start даёт `reused: true`, `stop` по мёртвому pid.
-- [ ] 9.2 Описать команды в `README.md` и `docs/PYTHON_TESTING.md`. Проверка: пример совпадает с `1c-testpilot client --help`.
+- [x] 9.1 `1c-testpilot client start|stop` по `specs/client-launch-cli` с пулом портов и файлом состояния; без подкоманды — MCP-сервер. Проверка: unit-тесты на фейковом `Client`: JSON и `disconnect` вместо `close`, остановка при неудаче, повторный start даёт `reused: true`, `stop` по мёртвому pid.
+- [x] 9.2 Описать команды в `README.md` и `docs/PYTHON_TESTING.md`. Проверка: пример совпадает с `1c-testpilot client --help`.
 
 ## 10. Поставка Testpilot.epf и версия
 
