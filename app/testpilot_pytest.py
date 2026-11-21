@@ -26,6 +26,7 @@ def pytest_addoption(parser):
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_configure(config):
+    config.addinivalue_line('markers', 'testpilot(user=None, profile=None): infobase user or profile of the testpilot client.')
     try:
         config._testpilot_reports = _log_reports.formats(config.getoption('--tc-reports')
                                                         or os.environ.get('TC1C_LOG_REPORTS', 'html'))
@@ -128,13 +129,53 @@ class _ClientSession:
             self.client = None
 
 
+class _Sessions:
+    """Clients by profile: several users of one test work at the same time."""
+
+    def __init__(self):
+        self.items = {}
+
+    def get(self, profile):
+        if profile not in self.items:
+            self.items[profile] = _ClientSession(profile)
+        return self.items[profile]
+
+    def close(self):
+        errors = []
+        for session in self.items.values():
+            try:
+                session.close()
+            except Exception as exc:
+                errors.append(f'{session.profile}: {exc}')
+        if errors:
+            raise RuntimeError('; '.join(errors))
+
+
 @pytest.fixture(scope='session')
 def _testpilot_session(request):
-    session = _ClientSession(request.config.getoption('--tc-profile'))
+    sessions = _Sessions()
     try:
-        yield session
+        yield sessions
     finally:
-        session.close()
+        sessions.close()
+
+
+@pytest.fixture
+def testpilot_user(request):
+    """Infobase user of the testpilot client; set it with indirect parametrization."""
+    return getattr(request, 'param', None)
+
+
+def _user_profile(base, user):
+    """The single profile with this user and the base of the --tc-profile profile."""
+    import _runtime as R
+    from testpilot import ActionError
+    found = R._profiles.find(user, base)
+    if len(found) != 1:
+        raise ActionError('as_user', dict(ok=False, code='ambiguous_profile' if found else 'profile_not_found',
+            error=f'Expected one profile with user {user!r} and the base of {base!r}, found {len(found)}.',
+            profiles=found))
+    return found[0]
 
 
 def _stop_test_logging(client):
@@ -149,26 +190,57 @@ def _stop_test_logging(client):
 
 
 @pytest.fixture
-def testpilot(request, testpilot_artifacts):
-    """Per-test artifacts and a test- or session-owned client selected by the profile."""
-    profile = request.config.getoption('--tc-profile')
-    if not profile:
+def testpilot(request, testpilot_artifacts, testpilot_user):
+    """Per-test artifacts and a test- or session-owned client selected by the profile.
+
+    The client starts at the start page (Client.reset). @pytest.mark.testpilot(user=…|profile=…)
+    or the testpilot_user parameter selects its user; testpilot.as_user(login) gives the client of
+    another user of the same infobase without restarting either.
+    """
+    base = request.config.getoption('--tc-profile')
+    if not base:
         raise pytest.UsageError('The testpilot fixture requires --tc-profile and TC1C_PROFILES_FILE.')
     import _runtime as R
+    from testpilot import ActionError
+    marker = request.node.get_closest_marker('testpilot')
+    options = dict(marker.kwargs) if marker else {}
+    user = options.get('user') or testpilot_user
+    try:
+        profile = options.get('profile') or (_user_profile(base, user) if user else base)
+    except ActionError as exc:
+        pytest.fail(f"{exc}: {exc.result.get('profiles')}", pytrace=False)
 
     mode = request.config.getoption('--tc-screenshots')
     if mode != 'off' and (not R.SCREENSHOTS or not R.LOGGING or not R._call_logging.enabled('TC1C_LOG_SCREENSHOTS')):
         raise pytest.UsageError('Screenshot logging must be enabled to use --tc-screenshots.')
     shared = request.config.getoption('--tc-client-scope') == 'session'
-    session = request.getfixturevalue('_testpilot_session') if shared else _ClientSession(profile)
+    sessions = request.getfixturevalue('_testpilot_session') if shared else _Sessions()
+    session = sessions.get(profile)
     reports = getattr(request.config, '_testpilot_reports', None)
     allure_enabled = reports is not None and 'allure' in reports
-    logs = None
-    if R.LOGGING:
-        logs = R._call_logging.Store(root=testpilot_artifacts,
+    def journal(root):
+        if not R.LOGGING:
+            return None
+        return R._call_logging.Store(root=root,
             screenshots=mode != 'off', default_mode=mode, reports=reports,
             allure_factory=_log_reports.PytestAllure if allure_enabled else None,
             allure_directory=request.config.option.allure_report_dir if allure_enabled else None)
+    logs = journal(testpilot_artifacts)
+    used = {}
+
+    def as_user(login):
+        other = _user_profile(base, login)
+        if other in used:
+            return used[other]
+        other_session = sessions.get(other)
+        used[other] = None   # Сессия учтена для закрытия, даже если запуск упадёт.
+        other_client = other_session.prepare(journal(testpilot_artifacts / re.sub(r'[^\w.-]+', '_', other)))
+        if R.LOGGING:
+            other_client.start_logging(screenshot_mode=mode)
+        other_client.reset()
+        other_client._user_resolver = as_user
+        used[other] = other_client
+        return other_client
     # Слепки неподтверждённых кликов попадают в артефакты этого теста.
     artifacts_env = os.environ.get('TC1C_ARTIFACTS_DIR')
     os.environ['TC1C_ARTIFACTS_DIR'] = str(testpilot_artifacts)
@@ -181,6 +253,9 @@ def testpilot(request, testpilot_artifacts):
         client = session.prepare(logs)
         if R.LOGGING:
             client.start_logging(screenshot_mode=mode)
+        client.reset()
+        client._user_resolver = as_user
+        used[profile] = client
         prepared = True
         yield client
     except Exception as exc:
@@ -196,14 +271,23 @@ def testpilot(request, testpilot_artifacts):
                 diagnostics = client.call('get_context', result_mode='full', check=False)
             except Exception as exc:
                 diagnostics = {'ok': False, 'error': str(exc)}
-        try:
-            if not shared or (not prepared and not session.started):
-                session.close()
-            elif session.client is not None and R.LOGGING:
-                _stop_test_logging(session.client)
-        except Exception as exc:
-            cleanup_error = str(exc)
-            session.started = False
+        for name in used:
+            current = sessions.get(name)
+            try:
+                if not shared or (not prepared and not current.started):
+                    current.close()
+                elif current.client is not None and R.LOGGING:
+                    _stop_test_logging(current.client)
+            except Exception as exc:
+                cleanup_error = (cleanup_error + '; ' if cleanup_error else '') + f'{name}: {exc}'
+                current.started = False
+        if profile not in used:
+            try:
+                if not shared or not session.started:
+                    session.close()
+            except Exception as exc:
+                cleanup_error = (cleanup_error + '; ' if cleanup_error else '') + str(exc)
+                session.started = False
         if artifacts_env is None:
             os.environ.pop('TC1C_ARTIFACTS_DIR', None)
         else:
@@ -229,3 +313,106 @@ def testpilot(request, testpilot_artifacts):
                 logging.getLogger(__name__).warning('Could not attach Testpilot diagnostics to Allure: %s', exc)
         if cleanup_error is not None and setup_error is None:
             pytest.fail('Testpilot cleanup failed: ' + cleanup_error, pytrace=False)
+
+
+_DELETE = '''
+Результат = Новый Структура("deleted,skipped,errors", 0, 0, Новый Массив);
+Для Каждого Ссылка Из Параметры["Ссылки"] Цикл
+    Попытка
+        Объект = Ссылка.ПолучитьОбъект();
+        Если Объект = Неопределено Тогда
+            Результат.skipped = Результат.skipped + 1;
+        Иначе
+            // Режим загрузки: подписки и проверки не мешают удалять в любом порядке.
+            Объект.ОбменДанными.Загрузка = Истина;
+            Если Метаданные.Документы.Содержит(Объект.Метаданные()) И Объект.Проведен Тогда
+                Объект.Записать(РежимЗаписиДокумента.ОтменаПроведения);
+            КонецЕсли;
+            Объект.Удалить();
+            Результат.deleted = Результат.deleted + 1;
+        КонецЕсли;
+    Исключение
+        Результат.errors.Добавить(Новый Структура("ref,error", Ссылка, КраткоеПредставлениеОшибки(ИнформацияОбОшибке())));
+    КонецПопытки;
+КонецЦикла;
+'''
+
+
+def _is_ref(value):
+    return isinstance(value, dict) and value.get('$type') == 'ref' and isinstance(value.get('metadata'), str)
+
+
+def _refs_in(value):
+    if _is_ref(value):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _refs_in(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _refs_in(item)
+
+
+def ref_from_url(url):
+    """Reference of an object form from its navigation link e1cib/data/<metadata>?ref=<32 hex>."""
+    match = re.fullmatch(r'e1cib/data/([^?]+)\?ref=([0-9a-fA-F]{32})', url or '')
+    if not match:
+        return None
+    h = match[2].lower()
+    # В навигационной ссылке части UUID переставлены: ref = clock_seq+node, time_hi, time_mid, time_low.
+    uuid_text = f'{h[24:32]}-{h[20:24]}-{h[16:20]}-{h[0:4]}-{h[4:16]}'
+    return {'$type': 'ref', 'metadata': match[1], 'uuid': uuid_text}
+
+
+class TestData:
+    """Objects created by a test; deleted after it in reverse order."""
+    __test__ = False
+
+    def __init__(self, client):
+        self.client, self.refs = client, []
+
+    def track(self, ref):
+        if not _is_ref(ref):
+            raise TypeError('track expects a reference value: {"$type": "ref", "metadata": ..., "uuid": ...}.')
+        if ref not in self.refs:
+            self.refs.append(ref)
+        return ref
+
+    def create(self, code, parameters=None):
+        """Run server code and track every reference in its Результат."""
+        result = self.client.execute_code(context='server', code=code, parameters=parameters or {})['result']
+        for ref in _refs_in(result):
+            self.track(ref)
+        return result
+
+    def track_window(self):
+        """Track the object of the active form; it must already be written."""
+        from testpilot import ActionError
+        window = self.client.call('get_active_window')
+        ref = ref_from_url(window.get('url'))
+        if ref is None:
+            raise ActionError('track_window', dict(ok=False, code='window_ref_unavailable',
+                error='The active window is not a written object form. Write the object first.',
+                window={k: window.get(k) for k in ('key', 'title', 'url')}))
+        return self.track(ref)
+
+    def cleanup(self):
+        if not self.refs:
+            return None
+        try:
+            self.client.reset()   # Открытая модифицированная форма держит блокировку объекта.
+        except Exception:
+            pass
+        return self.client.execute_code(context='server', code=_DELETE,
+                                        parameters={'Ссылки': list(reversed(self.refs))})['result']
+
+
+@pytest.fixture
+def testpilot_data(testpilot):
+    """create(code, parameters), track(ref), track_window(); deletion after the test, even a failed one."""
+    data = TestData(testpilot)
+    yield data
+    result = data.cleanup()
+    if result and result.get('errors'):
+        pytest.fail('Testpilot data was not deleted: ' + json.dumps(result['errors'], ensure_ascii=False),
+                    pytrace=False)

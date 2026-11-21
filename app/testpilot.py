@@ -263,6 +263,35 @@ class Client:
             raise ValueError('The element must belong to this Client.')
         return element.address
 
+    def reset(self, max_windows=10):
+        """Close windows down to the start page, cancelling row edits and answering «Нет» to saving.
+
+        Raises ActionError reset_failed with the window that did not close.
+        """
+        window = None
+        for _ in range(max_windows + 1):
+            window = self.call('get_active_window', check=False)
+            if not window.get('key') or window.get('home_page') or window.get('is_main'):
+                return window
+            for table in self.find_objects(cls='Table'):
+                if table.call('current_mode_is_edit', check=False).get('edit_mode'):
+                    table.call('end_edit_row', cancel=True, check=False)
+            self.call('close_window', check=False)
+            # Вопрос о сохранении появляется в ходе закрытия: проверка сразу, ожидание — только если окно не ушло.
+            answered = self.call('answer_dialog', answer='Нет', timeout=0, check=False)
+            if not answered.get('ok') and self.call('get_active_window', check=False).get('key') == window['key']:
+                self.call('answer_dialog', answer='Нет', timeout=1, check=False)
+        raise ActionError('reset', dict(ok=False, code='reset_failed', error='Windows did not close.',
+                                        window={k: window.get(k) for k in ('key', 'title', 'url')}))
+
+    def as_user(self, login):
+        """Client of another infobase user in the same pytest test (testpilot fixture only)."""
+        resolver = vars(self).get('_user_resolver')
+        if resolver is None:
+            raise ActionError('as_user', dict(ok=False, code='as_user_unavailable',
+                                              error='as_user is available on the pytest testpilot fixture.'))
+        return resolver(login)
+
     def close(self):
         """Release this session; a failed stop retains ownership so close can be retried."""
         with self._access('close'):
