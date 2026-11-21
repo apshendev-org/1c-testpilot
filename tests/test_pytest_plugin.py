@@ -103,6 +103,22 @@ def test_one(testpilot):
     assert ['reset', 'роль:kfk_user'] in events
 
 
+def test_role_client_uses_tc_profile_client_as_admin(run):
+    result, events = run('''
+import pytest
+
+@pytest.mark.testpilot(user="kfk_user")
+def test_one(testpilot):
+    runtime = testpilot._runtime
+    assert runtime.admin_profile == "ib"
+    admin = runtime.admin("ib")
+    assert admin.profile == "ib" and runtime.admin("ib") is admin
+    assert admin.as_user("kfk_user") is testpilot
+''')
+    result.assert_outcomes(passed=1)
+    assert events.count(['new', 'ib']) == 1 and ['close', 'ib'] in events
+
+
 def test_two_users_in_one_test_and_next_test_reuses(run):
     result, events = run('''
 def test_one(testpilot):

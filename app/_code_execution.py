@@ -304,6 +304,11 @@ def discover(R, client, *, startup=False):
         return service, objects
 
 
+def forbidden(message):
+    # shortcut: только русский текст платформы 8.3.27; английский добавить, когда встретится живьём.
+    return 'запрещен запуск внешних обработок' in (message or '').lower()
+
+
 def prepare(R, client, path, deadline):
     """Only startup may approve the exact configured file; never an arbitrary dialog."""
     old_deadline = getattr(client, '_io_deadline', None)
@@ -361,6 +366,12 @@ def prepare(R, client, path, deadline):
                         if len(yes) == 1:
                             _checked(R.tc_click(**_address(yes[0]), expect='none'))
                             break
+                    if forbidden(message):
+                        buttons = [o for o in children if o.get('class') == 'Button']
+                        if len(buttons) == 1:
+                            _checked(R.tc_click(**_address(buttons[0]), expect='none'))
+                        raise Failure('helper_forbidden', 'The user may not run external processing; the client works '
+                                      'without it, code and checks go through the admin client.', execution_reason=message)
                     if message:
                         raise Failure('helper_startup_blocked', 'A startup dialog requires attention.', dialog=message)
             time.sleep(min(.2, max(0, deadline - time.monotonic())))

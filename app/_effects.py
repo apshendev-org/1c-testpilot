@@ -1,6 +1,7 @@
 """Click effect engine: the action confirms its own effect, waits, retries once and handles dialogs."""
 import json
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -18,6 +19,18 @@ _STANDARD = {
     'Создать': 'opened', 'Create': 'opened',
 }
 _FIELD_LIMIT = 200
+_POSTED = 'ВЫБРАТЬ Проведен ИЗ {} ГДЕ Ссылка = &Ссылка'
+
+
+def ref_from_url(url):
+    """Reference of an object form from its navigation link e1cib/data/<metadata>?ref=<32 hex>."""
+    match = re.fullmatch(r'e1cib/data/([^?]+)\?ref=([0-9a-fA-F]{32})', url or '')
+    if not match:
+        return None
+    h = match[2].lower()
+    # В навигационной ссылке части UUID переставлены: ref = clock_seq+node, time_hi, time_mid, time_low.
+    uuid_text = f'{h[24:32]}-{h[20:24]}-{h[16:20]}-{h[0:4]}-{h[4:16]}'
+    return {'$type': 'ref', 'metadata': match[1], 'uuid': uuid_text}
 
 
 def expected_effect(key):
@@ -103,6 +116,20 @@ class Observer:
             return [key, S._cell_flag(self.c, S.G.CURRENT_MODE_IS_EDIT, key, table.get('handle')) if table else None]
         except S.tc1c.OperationError:
             return None
+
+    def posted_by_admin(self, after):
+        """Проведен of the form object, read by the admin client; None while the window has no ref."""
+        ref = ref_from_url(after.get('url'))
+        if ref is None:
+            return None
+        result = self.S._admin_client.call(self.S, 'execute_query', dict(
+            query=_POSTED.format(ref['metadata']), parameters={'Ссылка': ref}, limit=1))
+        if not result.get('ok'):
+            raise self.S._code_execution.Failure(result.get('code') or 'admin_query_failed',
+                                                 result.get('error') or 'The admin client could not read the object.',
+                                                 delegated_to=result.get('delegated_to'))
+        rows = result.get('rows') or []
+        return dict(ref=ref, delegated_to=result.get('delegated_to')) if rows and rows[0].get('Проведен') is True else None
 
     def capture(self):
         S = self.S
@@ -219,6 +246,8 @@ def run(S, c, key, send, *, answer=None, expect=None, timeout=10.0, interval=0.2
     if expected == 'changed':
         observer.prepare_fields()
     before = observer.capture()
+    if expected == 'posted' and observer.helper is not True:
+        observer.S._admin_client.profile(S)   # без обработки и админ-клиента — отказ до клика
     result = send()
     if not result.get('ok'):
         return result
@@ -241,6 +270,11 @@ def run(S, c, key, send, *, answer=None, expect=None, timeout=10.0, interval=0.2
                             target=key, expected=expected)
             return dict(_dialogs.refusal(dialog), target=key, expected=expected)
         effect = observed(expected, observer, before, after)
+        if (not effect and expected == 'posted' and observer.helper is not True
+                and after.get('found') and after.get('modified') is False):
+            effect = observer.posted_by_admin(after)
+            if effect:
+                effect = dict(effect='posted', **effect)
         if effect:
             out = dict(result, **{k: v for k, v in effect.items() if v is not None})
             out.update(window=dict(key=after.get('window'), title=after.get('title'), url=after.get('url')),
@@ -254,9 +288,6 @@ def run(S, c, key, send, *, answer=None, expect=None, timeout=10.0, interval=0.2
         if expected != 'changed' and _new_messages(before, after):
             return dict(_failure(S, 'effect_not_observed', 'The command reported messages instead of its effect.',
                                  expected, after, messages=_new_messages(before, after)), target=key)
-        if expected == 'posted' and observer.helper is not True:
-            return dict(ok=False, code='effect_unverifiable', target=key, expected=expected,
-                        error='Posting is visible only through the Testpilot processing. Launch the client with it.')
         now = time.monotonic()
         if now >= deadline:
             return dict(_failure(S, 'effect_not_observed', 'The expected effect was not observed before the timeout.',

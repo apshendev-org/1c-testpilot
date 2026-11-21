@@ -21,8 +21,8 @@ class Failure(Exception):
 class World:
     """1C client stub: form state plus delayed consequences of clicks and dialog answers."""
 
-    def __init__(self, helper=True, **state):
-        self.helper = helper
+    def __init__(self, helper=True, admin=None, **state):
+        self.helper, self.admin = helper, admin
         self.state = dict(window=WINDOW, open=True, modified=True, posted=False, ref=None,
                           values={'Сумма': 0}, messages=[], dialog=None, focus=FORM + '.EditField[Сумма]', editing=False)
         self.state.update(state)
@@ -53,7 +53,7 @@ class World:
             world.tick()
             if st['dialog']:
                 return dict(key=DIALOG, title='1С:Предприятие')
-            return dict(key=st['window'], title='Форма ' + st['window'])
+            return dict(key=st['window'], title='Форма ' + st['window'], url=st.get('url'))
 
         def search(c, key):
             if key == DIALOG:
@@ -93,7 +93,7 @@ class World:
             _search_objects=search, _guid_available=lambda c, guid: True,
             _user_messages_result=lambda reply: dict(ok=True, messages=list(st['messages'])),
             _code_execution=SimpleNamespace(form_state=form_state, Failure=Failure),
-            _ref_live_object=live, _scalar=lambda reply, fn: st['modified'], _bool_from_resp=None,
+            _ref_live_object=live, _admin_client=world.admin, _scalar=lambda reply, fn: st['modified'], _bool_from_resp=None,
             tc_get_context=lambda **kw: dict(ok=True, form='context'))
         return S, SimpleNamespace(send_cmd=send_cmd)
 
@@ -144,8 +144,41 @@ def test_post_with_helper_and_without():
     world = World()
     result = click(world, 'ФормаПровести', lambda w: w.later(0, modified=False, ref='r', posted=True), timeout=2)
     assert result['ok'] and result['effect'] == 'posted'
-    result = click(World(helper=False), 'ФормаПровести', lambda w: w.later(0, modified=False), timeout=2)
-    assert result['ok'] is False and result['code'] == 'effect_unverifiable'
+
+
+URL = 'e1cib/data/Документ.Р?ref=8ca0000d8843cd1b11dc8d8c3d7a1aab'
+
+
+class Admin:
+    """Admin client stub: answers the posting query; profile() refuses when no profile is known."""
+
+    def __init__(self, posted=True, missing=False):
+        self.posted, self.missing, self.queries = posted, missing, []
+
+    def profile(self, S):
+        if self.missing:
+            raise Failure('admin_client_unavailable')
+        return 'ib'
+
+    def call(self, S, action, arguments):
+        self.queries.append((action, arguments))
+        return dict(ok=True, rows=[{'Проведен': self.posted}], delegated_to='ib')
+
+
+def test_post_without_helper_is_confirmed_by_admin_query():
+    admin = Admin()
+    world = World(helper=False, admin=admin)
+    result = click(world, 'ФормаПровести', lambda w: w.later(0, modified=False, url=URL), timeout=2)
+    assert result['ok'] and result['effect'] == 'posted' and result['delegated_to'] == 'ib'
+    action, arguments = admin.queries[0]
+    assert action == 'execute_query' and arguments['parameters']['Ссылка']['metadata'] == 'Документ.Р'
+
+
+def test_post_without_helper_and_admin_is_refused_before_click():
+    world = World(helper=False, admin=Admin(missing=True))
+    with pytest.raises(Failure):
+        click(world, 'ФормаПровести', lambda w: w.later(0, modified=False, url=URL), timeout=2)
+    assert world.clicks == 0
 
 
 def test_create_opens_new_form():

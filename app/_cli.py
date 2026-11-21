@@ -55,7 +55,8 @@ def client_start(profile):
     client.call('disconnect', check=False)
     _emit(dict(ok=True, profile=profile, pid=result.get('pid'), host='127.0.0.1', port=result.get('port'),
                version=result.get('version'), execution_ready=result.get('execution_ready'),
-               reused=bool(result.get('reused'))))
+               reused=bool(result.get('reused')),
+               **({'execution_reason': result['execution_reason']} if result.get('execution_reason') else {})))
     return 0
 
 

@@ -16,6 +16,7 @@ import _snapshots
 import _form_context
 import _action_diagnostics
 import _dialogs
+import _admin_client
 import _client_registry
 import _effects
 import _typed_input
@@ -1256,7 +1257,8 @@ def tc_connect(port: int, host: str = '127.0.0.1', version: str = None) -> str:
             try:
                 _code_execution.prepare(sys.modules[__name__], c, _state['_code_launch_path'], time.monotonic() + 120)
             except _code_execution.Failure as exc:
-                return _finish_client_launch(dict(exc.result))
+                if exc.result['code'] != 'helper_forbidden':
+                    return _finish_client_launch(dict(exc.result))
             except (OSError, RuntimeError) as exc:
                 return _finish_client_launch(dict(ok=False, code='helper_startup_failed', error=str(exc)))
         else:
@@ -1445,7 +1447,11 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
             _code_execution.prepare(sys.modules[__name__], _state['client'], helper_path, deadline)
             out['execution_ready'] = True
         except _code_execution.Failure as exc:
-            out.update(exc.result)
+            if exc.result['code'] == 'helper_forbidden':
+                # Ролевой пользователь без права на внешние обработки — нормальный случай (design Д).
+                out.update(execution_ready=False, execution_reason=exc.result['execution_reason'])
+            else:
+                out.update(exc.result)
         except (OSError, RuntimeError) as exc:
             out.update(ok=False, code='helper_startup_failed', error=str(exc))
     elif helper_path:
@@ -1583,9 +1589,24 @@ def tc_execute_code(code: str, context: typing.Literal['client', 'server'],
     0<timeout<=3600 seconds (default 180). Timeout does not cancel execution; the next call
     retrieves the pending result before accepting new code. Returned dates/references carry type
     information."""
-    return _code_execution.execute(sys.modules[__name__], _need(), mode='code', context=context,
-                                   code=code, parameters=parameters, timeout=timeout,
-                                   check_permissions=_execution.get() is None)
+    return _with_admin('execute_code', dict(code=code, context=context, parameters=parameters, timeout=timeout),
+                       lambda: _code_execution.execute(sys.modules[__name__], _need(), mode='code', context=context,
+                                                       code=code, parameters=parameters, timeout=timeout,
+                                                       check_permissions=_execution.get() is None))
+
+
+def _with_admin(action, arguments, run):
+    """Run in this client's processing; without it, in the admin client of the same base (design Д)."""
+    try:
+        return run()
+    except _code_execution.Failure as exc:
+        if exc.result.get('code') != 'helper_not_ready':
+            raise
+    if arguments.get('context') == 'client':
+        raise _code_execution.Failure('client_code_unavailable', 'This client has no Testpilot processing (its user may '
+                                      'not run external processing); client-context code runs only in its own session. '
+                                      'Use context="server": it runs in the admin client of the same base.')
+    return _admin_client.call(sys.modules[__name__], action, arguments)
 
 
 @_action('tc_run_compatible_scenario')
@@ -1624,9 +1645,10 @@ def tc_execute_query(query: str, parameters: dict = None, limit: int = 100, time
     РАЗРЕШЕННЫЕ is added if absent to the first ВЫБРАТЬ of each batch statement. limit=1..500 rows
     (default 100). Returns columns/rows/returned_rows/truncated; permissions affect results.
     0<timeout<=3600 seconds (default 180); timeout does not cancel the query."""
-    return _code_execution.execute(sys.modules[__name__], _need(), mode='query', context='server',
-                                   query=query, parameters=parameters, limit=limit, timeout=timeout,
-                                   check_permissions=_execution.get() is None)
+    return _with_admin('execute_query', dict(query=query, parameters=parameters, limit=limit, timeout=timeout),
+                       lambda: _code_execution.execute(sys.modules[__name__], _need(), mode='query', context='server',
+                                                       query=query, parameters=parameters, limit=limit, timeout=timeout,
+                                                       check_permissions=_execution.get() is None))
 
 @_action('tc_get_metadata')
 def tc_get_metadata(name: str = None, meta_type: str = None, search: str = None,
@@ -1640,8 +1662,11 @@ def tc_get_metadata(name: str = None, meta_type: str = None, search: str = None,
     Lists: limit 1..500, offset >= 0. timeout: maximum wait in seconds, 0 < timeout <= 3600."""
     from _service_metadata import metadata_options
     options = metadata_options(name, meta_type, search, field_search, sections, limit, offset)
-    return _code_execution.execute(sys.modules[__name__], _need(), mode='metadata', context='server',
-                                   options=options, timeout=timeout, check_permissions=_execution.get() is None)
+    return _with_admin('get_metadata', dict(name=name, meta_type=meta_type, search=search, field_search=field_search,
+                                            sections=sections, limit=limit, offset=offset, timeout=timeout),
+                       lambda: _code_execution.execute(sys.modules[__name__], _need(), mode='metadata', context='server',
+                                                       options=options, timeout=timeout,
+                                                       check_permissions=_execution.get() is None))
 
 
 @_action('tc_list_custom_bsl_functions')
@@ -1650,7 +1675,8 @@ def tc_list_custom_bsl_functions() -> dict:
     Returns their names, descriptions, execution contexts, parameters and result descriptions.
     Use execute_custom_bsl_function to run a listed function."""
     from _service_metadata import list_functions
-    return list_functions(sys.modules[__name__], _need(), check_permissions=_execution.get() is None)
+    return _with_admin('list_custom_bsl_functions', {},
+                       lambda: list_functions(sys.modules[__name__], _need(), check_permissions=_execution.get() is None))
 
 
 @_action('tc_execute_custom_bsl_function')
@@ -1661,9 +1687,10 @@ def tc_execute_custom_bsl_function(name: str, parameters: dict = None, timeout: 
     Parameters support JSON values and typed date/reference/enum objects, as in execute_code.
     timeout is the maximum wait in seconds (default 180), greater than 0 and at most 3600.
     A timeout does not cancel execution; the next execution call first reads the pending result."""
-    return _code_execution.execute(sys.modules[__name__], _need(), mode='function', context='server',
-                                   name=name, parameters=parameters, timeout=timeout,
-                                   check_permissions=_execution.get() is None)
+    return _with_admin('execute_custom_bsl_function', dict(name=name, parameters=parameters, timeout=timeout),
+                       lambda: _code_execution.execute(sys.modules[__name__], _need(), mode='function', context='server',
+                                                       name=name, parameters=parameters, timeout=timeout,
+                                                       check_permissions=_execution.get() is None))
 
 
 # ============================== журнал вызовов ===============================

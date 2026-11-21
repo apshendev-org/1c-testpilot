@@ -10,6 +10,7 @@ import uuid
 
 import pytest
 import _log_reports
+from _effects import ref_from_url  # noqa: F401  (часть API плагина)
 
 
 def pytest_addoption(parser):
@@ -229,7 +230,15 @@ def testpilot(request, testpilot_artifacts, testpilot_user):
     used = {}
 
     def as_user(login):
-        other = _user_profile(base, login)
+        return use(_user_profile(base, login))
+
+    def bind(client):
+        client._user_resolver = as_user
+        # Код, запросы и проверка проведения клиента без обработки Testpilot идут через клиент --tc-profile.
+        client._runtime.admin_profile = base
+        client._runtime.admin = use
+
+    def use(other):
         if other in used:
             return used[other]
         other_session = sessions.get(other)
@@ -238,7 +247,7 @@ def testpilot(request, testpilot_artifacts, testpilot_user):
         if R.LOGGING:
             other_client.start_logging(screenshot_mode=mode)
         other_client.reset()
-        other_client._user_resolver = as_user
+        bind(other_client)
         used[other] = other_client
         return other_client
     # Слепки неподтверждённых кликов попадают в артефакты этого теста.
@@ -254,7 +263,7 @@ def testpilot(request, testpilot_artifacts, testpilot_user):
         if R.LOGGING:
             client.start_logging(screenshot_mode=mode)
         client.reset()
-        client._user_resolver = as_user
+        bind(client)
         used[profile] = client
         prepared = True
         yield client
@@ -357,17 +366,6 @@ def _refs_in(value):
     elif isinstance(value, list):
         for item in value:
             yield from _refs_in(item)
-
-
-def ref_from_url(url):
-    """Reference of an object form from its navigation link e1cib/data/<metadata>?ref=<32 hex>."""
-    match = re.fullmatch(r'e1cib/data/([^?]+)\?ref=([0-9a-fA-F]{32})', url or '')
-    if not match:
-        return None
-    h = match[2].lower()
-    # В навигационной ссылке части UUID переставлены: ref = clock_seq+node, time_hi, time_mid, time_low.
-    uuid_text = f'{h[24:32]}-{h[20:24]}-{h[16:20]}-{h[0:4]}-{h[4:16]}'
-    return {'$type': 'ref', 'metadata': match[1], 'uuid': uuid_text}
 
 
 class TestData:
