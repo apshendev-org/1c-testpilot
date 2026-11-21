@@ -41,11 +41,14 @@ class Observer:
         self.form_window = S._collection_parent(self.form) if self.form else None
         self.helper = None   # None — неизвестно, False — обработки нет, True — form_state читается
         self.fields = []
+        self.focus = False
 
     def prepare_fields(self):
         # Только для прочих команд: значения полей нужны лишь для «любого изменения».
         if not self.form:
             return
+        # Добавление строки и подобные команды видны только по фокусу и режиму редактирования таблицы.
+        self.focus = True
         try:
             objects = self.S._search_objects(self.c, self.form)
         except Exception:
@@ -86,6 +89,21 @@ class Observer:
             return None
         return S._scalar(reply, S._bool_from_resp)
 
+    def current(self):
+        """Focused element of the form and, for a table, whether its row is being edited."""
+        S = self.S
+        obj = S._ref_live_object(self.c, self.form)
+        if not obj:
+            return None
+        try:
+            key = S._input_current(self.c, dict(key=self.form, handle=obj.get('handle')))
+            if not key or S._key_class(key) != 'Table':
+                return key
+            table = S._ref_live_object(self.c, key)
+            return [key, S._cell_flag(self.c, S.G.CURRENT_MODE_IS_EDIT, key, table.get('handle')) if table else None]
+        except S.tc1c.OperationError:
+            return None
+
     def capture(self):
         S = self.S
         S._state['window_key'] = None
@@ -102,11 +120,13 @@ class Observer:
         elif self.form:
             open_ = self.S._ref_live_object(self.c, self.form) is not None
             state.update(found=open_, modified=self.modified() if open_ else None)
+        if self.focus and state.get('found') is not False:
+            state['current'] = self.current()
         return state
 
 
 def _same(before, after):
-    keys = ('window', 'title', 'url', 'found', 'modified', 'object', 'values', 'messages')
+    keys = ('window', 'title', 'url', 'found', 'modified', 'object', 'values', 'messages', 'current')
     return all(before.get(k) == after.get(k) for k in keys) and after.get('dialog') is None
 
 
@@ -117,7 +137,7 @@ def _new_messages(before, after):
 
 def _changes(before, after):
     out = {}
-    for k in ('window', 'title', 'url', 'modified', 'object'):
+    for k in ('window', 'title', 'url', 'modified', 'object', 'current'):
         if before.get(k) != after.get(k):
             out[k] = after.get(k)
     if before.get('found') and after.get('found') is False:

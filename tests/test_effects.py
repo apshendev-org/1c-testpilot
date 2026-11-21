@@ -24,7 +24,7 @@ class World:
     def __init__(self, helper=True, **state):
         self.helper = helper
         self.state = dict(window=WINDOW, open=True, modified=True, posted=False, ref=None,
-                          values={'Сумма': 0}, messages=[], dialog=None)
+                          values={'Сумма': 0}, messages=[], dialog=None, focus=FORM + '.EditField[Сумма]', editing=False)
         self.state.update(state)
         self.events, self.clicks, self.on_answer = [], 0, {}
 
@@ -82,7 +82,10 @@ class World:
 
         live = lambda c, key: {'handle': 'h'} if st['open'] else None  # noqa: E731
         S = SimpleNamespace(
-            G=SimpleNamespace(CLICK='click', GET_USER_MESSAGE_TEXTS='messages', CURRENT_MODIFIED='modified'),
+            G=SimpleNamespace(CLICK='click', GET_USER_MESSAGE_TEXTS='messages', CURRENT_MODIFIED='modified',
+                              CURRENT_MODE_IS_EDIT='edit'),
+            _input_current=lambda c, form: st['focus'], _cell_flag=lambda c, guid, key, handle: st['editing'],
+            _key_class=lambda key: key.rsplit('.', 1)[-1].split('[')[0],
             RC=b'', RS=b'', _state={}, tc1c=SimpleNamespace(OperationError=Failure),
             _batches=SimpleNamespace(owner=lambda S, key: FORM),
             _collection_parent=lambda key: key.rsplit('.', 1)[0] if '.' in key else None,
@@ -112,6 +115,12 @@ def artifacts(tmp_path, monkeypatch):
 ])
 def test_expected_effect_by_button_name(name, effect):
     assert _effects.expected_effect(f'{FORM}.Button[{name}]') == effect
+
+
+def test_added_row_is_seen_by_focus_and_edit_mode():
+    world = World(focus=FORM + '.Table[Товары]')
+    result = click(world, 'ТоварыДобавить', lambda w: w.later(0, editing=True), timeout=2)
+    assert result['ok'] and result['changes'] == {'current': [FORM + '.Table[Товары]', True]}
 
 
 def test_save_succeeds_with_ref():
