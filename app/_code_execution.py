@@ -255,6 +255,26 @@ def _read(R, obj):
     return result
 
 
+BSP_SECURITY_WARNING = ('ОбщаяФорма.ПредупреждениеБезопасности', 'CommonForm.ПредупреждениеБезопасности')
+# Стартовые страницы формы БСП: «После появления права» — ЯОзнакомлен, «После обновления» — НеЗапрещать.
+# Кнопку по умолчанию «ЗапретитьОткрытиеВнешнихОтчетовИОбработок» не нажимаем: Testpilot.epf перестал бы открываться.
+BSP_SECURITY_ANSWERS = ('ЯОзнакомлен', 'НеЗапрещать')
+
+
+def _acknowledge_security_warning(R, objects, form):
+    """Ответить на стартовое предупреждение безопасности БСП; кнопка скрытой страницы — берём следующую."""
+    buttons = {o.get('name'): o for o in objects
+               if o.get('class') == 'Button' and o.get('key', '').startswith(form['key'] + '.')}
+    for name in BSP_SECURITY_ANSWERS:
+        if name not in buttons:
+            continue
+        # Кнопку невидимой страницы клиент принимает без эффекта: ok с target_hidden — не ответ.
+        result = R.tc_click(**_address(buttons[name]), expect='none')
+        if result.get('ok') and not result.get('target_hidden'):
+            return
+    raise Failure('helper_startup_blocked', 'A startup dialog requires attention.', dialog='ПредупреждениеБезопасности')
+
+
 def discover(R, client, *, startup=False):
     with internal(client):
         objects = R._search_objects(client, R._APPLICATION_ROOT)
@@ -268,6 +288,9 @@ def discover(R, client, *, startup=False):
                 if form.get('form_name') in ('ОбщаяФорма.ПодключениеИнтернетПоддержки',
                                              'CommonForm.ПодключениеИнтернетПоддержки'):
                     _checked(R.tc_close_window(key=active['key']))
+                    return None, []
+                if form.get('form_name') in BSP_SECURITY_WARNING:
+                    _acknowledge_security_warning(R, objects, form)
                     return None, []
                 if form.get('form_name') == 'MessageBox':
                     # Read the startup question before trying fields behind its modal window.

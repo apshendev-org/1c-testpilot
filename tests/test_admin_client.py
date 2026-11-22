@@ -94,3 +94,44 @@ def test_forbidden_external_processing_is_closed_at_startup():
         E.prepare(S, SimpleNamespace(), 'Testpilot.epf', time.monotonic() + 1)
     assert error.value.result['code'] == 'helper_forbidden' and error.value.result['execution_reason'] == text
     assert [c['key'] for c in clicked] == [box + '.ManagedForm[m].Button[Button0]']
+
+
+def _bsp_warning(clicks):
+    """Стартовая форма БСП ПредупреждениеБезопасности: ответы кнопок — из clicks (имя -> результат tc_click)."""
+    box = 'SecondaryFrame[w]'
+    form = box + '.ManagedForm[f]'
+    objects = [dict(key=form, form_name='ОбщаяФорма.ПредупреждениеБезопасности', **{'class': 'ManagedForm'})]
+    objects += [dict(key=f'{form}.Button[{name}]', name=name, handle=name, **{'class': 'Button'})
+                for name in ('ЗапретитьОткрытиеВнешнихОтчетовИОбработок', 'НеЗапрещать', 'ЯОзнакомлен')]
+    clicked = []
+
+    def click(**kw):
+        name = kw['key'].rsplit('[', 1)[1][:-1]
+        clicked.append(name)
+        return clicks.get(name, dict(ok=True))
+
+    S = SimpleNamespace(_APPLICATION_ROOT=None, _search_objects=lambda c, root: objects,
+                        _window=lambda c: dict(key=box), tc_click=click)
+    return S, clicked
+
+
+def test_bsp_security_warning_acknowledged_at_startup():
+    S, clicked = _bsp_warning({})
+    assert E.discover(S, SimpleNamespace(), startup=True) == (None, [])
+    assert clicked == ['ЯОзнакомлен']
+
+
+def test_bsp_security_warning_after_update_keeps_external_processing():
+    # Страница «После обновления»: ЯОзнакомлен на скрытой странице, кнопку запрета не нажимаем.
+    S, clicked = _bsp_warning({'ЯОзнакомлен': dict(ok=True, target_hidden=True)})
+    assert E.discover(S, SimpleNamespace(), startup=True) == (None, [])
+    assert clicked == ['ЯОзнакомлен', 'НеЗапрещать']
+
+
+def test_bsp_security_warning_without_answer_blocks_startup():
+    S, clicked = _bsp_warning({'ЯОзнакомлен': dict(ok=False), 'НеЗапрещать': dict(ok=True, target_hidden=True)})
+    with pytest.raises(E.Failure) as error:
+        E.discover(S, SimpleNamespace(), startup=True)
+    assert error.value.result['code'] == 'helper_startup_blocked'
+    assert error.value.result['dialog'] == 'ПредупреждениеБезопасности'
+    assert 'ЗапретитьОткрытиеВнешнихОтчетовИОбработок' not in clicked
