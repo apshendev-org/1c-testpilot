@@ -9,8 +9,9 @@ import json
 import re
 from pathlib import Path
 
-RECORDING = (Path(__file__).resolve().parents[2]
-             / 'docs' / 'spikes' / 'testpilot-report-recording' / 'recording' / 'report-date-droplist.jsonl')
+# Копия записи рядом с тестами: testpilot уходит в форк 1c-testpilot без docs/ кита; совпадение проверяет
+# payload/tests/test_spike_recordings.py.
+RECORDING = Path(__file__).resolve().parent / 'recordings' / 'report-date-droplist.jsonl'
 
 
 def _indent(line):
