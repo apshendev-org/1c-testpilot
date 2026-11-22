@@ -187,6 +187,15 @@ def test_failed_delete(testpilot_data):
     assert summary['data_error'][0]['error'] == 'locked'
 
 
+def test_keep_data_skips_deletion(run):
+    result, events = run('''
+def test_ok(testpilot_data):
+    testpilot_data.track({"$type": "ref", "metadata": "Документ.Р", "uuid": "d"})
+''', '--tc-keep-data')
+    result.assert_outcomes(passed=1)
+    assert not any(e[0] == 'delete' for e in events)
+
+
 def test_ref_from_navigation_link():
     assert plugin.ref_from_url('e1cib/data/Справочник.Контрагенты?ref=8ca0000d8843cd1b11dc8d8c3d7a1aab') == {
         '$type': 'ref', 'metadata': 'Справочник.Контрагенты', 'uuid': '3d7a1aab-8d8c-11dc-8ca0-000d8843cd1b'}
@@ -199,16 +208,29 @@ class Windows(testpilot.Client):
     def __init__(self, windows, stuck=False):
         self.windows, self.stuck, self.calls = windows, stuck, []
 
+    drop_list = False
+
     def find_objects(self, **criteria):
-        return []
+        return [Form()] if criteria.get('cls') == 'ManagedForm' else []
 
     def call(self, action, check=True, **kw):
         self.calls.append((action, kw.get('answer')))
         if action == 'get_active_window':
             return self.windows[-1]
-        if action == 'close_window' and not self.stuck:
+        if action == 'drop_list_is_open':
+            return {'ok': True, 'open': self.drop_list}
+        if action == 'close_drop_list':
+            self.drop_list = False
+        if action == 'close_window' and not self.stuck and not self.drop_list:
             self.windows.pop()
         return {'ok': action != 'answer_dialog'}
+
+
+class Form:
+    """Form of the active window whose current element is a field."""
+
+    def call(self, action, check=True, **kw):
+        return {'ok': True, 'item': [{'key': 'Field', 'handle': 'h'}]}
 
 
 def test_reset_closes_windows_to_start_page():
@@ -222,3 +244,11 @@ def test_reset_reports_window_that_did_not_close():
     with pytest.raises(testpilot.ActionError) as error:
         client.reset(max_windows=2)
     assert error.value.code == 'reset_failed' and error.value.result['window']['key'] == 'Doc'
+
+
+def test_reset_closes_open_drop_list_before_window():
+    client = Windows([dict(key='Home', home_page=True), dict(key='Doc', title='Контракт')])
+    client.drop_list = True
+    assert client.reset()['key'] == 'Home'
+    actions = [a for a, _ in client.calls]
+    assert actions.index('close_drop_list') < actions.index('cancel_edit') < actions.index('close_window')

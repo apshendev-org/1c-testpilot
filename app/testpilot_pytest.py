@@ -23,6 +23,8 @@ def pytest_addoption(parser):
     group.addoption('--tc-client-scope', choices=('test', 'session'), default='test',
                     help='Client lifetime: test (default) or session. Session reuses application state; '
                          'journals and artifacts remain separate for each test.')
+    group.addoption('--tc-keep-data', action='store_true',
+                    help='Keep testpilot_data objects after the test for manual inspection; default: delete them.')
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -413,9 +415,11 @@ class TestData:
 
 @pytest.fixture
 def testpilot_data(testpilot, request):
-    """create(code, parameters), track(ref), track_window(); deletion after the test, even a failed one."""
+    """create(code, parameters), track(ref), track_window(); deletion after the test, even a failed one (not with --tc-keep-data)."""
     data = TestData(testpilot)
     yield data
+    if request.config.getoption('--tc-keep-data'):
+        return
     try:
         result = data.cleanup()
     except Exception as exc:

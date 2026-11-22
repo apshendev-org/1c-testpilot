@@ -70,6 +70,12 @@ def matches(kind, text, value, service=None):
     return None
 
 
+def same_date(text, presentation, sample):
+    """Whether the text and the shown presentation denote one date (field type unknown: «01.01.2026» = «01.01.2026 0:00:00»)."""
+    wanted = _date(text, sample)
+    return wanted is not None and wanted == _date(presentation or '', sample)
+
+
 def field_value(S, c, key):
     """(kind, value) of an input field through form_state, or (None, None) without the helper."""
     form = S._batches.owner(S, key)

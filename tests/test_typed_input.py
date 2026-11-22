@@ -43,6 +43,15 @@ def test_verdict_rejects_string_suffix(monkeypatch):
     assert result['ok'] is False and result['code'] == 'value_mismatch' and result['actual'] == 'Протон-2'
 
 
+def test_verdict_unknown_type_accepts_same_date(monkeypatch):
+    c = SimpleNamespace(_testpilot_service=SERVICE)
+    monkeypatch.setattr(T, 'field_value', lambda S, c, key: (None, None))
+    accepted = R._typed_verdict(c, 'F.EditField[КомпоновщикНастроекПользовательскиеНастройкиЭлемент0Значение]',
+                                '01.01.2026', '01.01.2026 0:00:00')
+    assert accepted['committed'] is True and accepted['verification'] == 'date_text'
+    assert R._typed_verdict(c, 'F.EditField[Поле]', '01.01.2026', '02.01.2026 0:00:00')['code'] == 'value_mismatch'
+
+
 def test_verdict_without_helper_is_exact_text(monkeypatch):
     assert verdict(monkeypatch, None, None, '2', '2')['committed'] is True
     assert verdict(monkeypatch, None, None, '2', '2,000')['code'] == 'value_mismatch'

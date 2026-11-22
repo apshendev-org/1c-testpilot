@@ -1917,7 +1917,8 @@ def tc_input_text(key: str, text: str, handle: str, finish: bool = True) -> dict
     committed=true/false/null means accepted/pending/unverified; edit_finished means focus left;
     changed compares displayed text. With the Testpilot processing the value is compared by the field
     type: number numerically ("2" = "2,000", "2" != "20"), date as a date, boolean by value, string
-    exactly; without it the accepted text must equal text. A mismatch is ok=false, value_mismatch with
+    exactly; without it (or when the field type is unknown) the accepted text must equal text or
+    denote the same date. A mismatch is ok=false, value_mismatch with
     expected/actual. A reference field is filled by choosing the item whose presentation equals text
     exactly; none or several give value_not_found/ambiguous_value with candidates. Prefixes never
     match. These flags do not confirm saving. For table cells use tc_set_cell_text;
@@ -1981,6 +1982,9 @@ def _typed_verdict(c, key, text, presentation):
         if presentation is None:
             return {}
         kind, value, verdict = None, presentation, presentation == text
+        # Тип не прочитан (поле компоновщика настроек): «01.01.2026» и «01.01.2026 0:00:00» — одна дата.
+        if not verdict and _typed_input.same_date(text, presentation, _typed_input.service(c).get('date_sample')):
+            return dict(committed=True, input_status='accepted', verification='date_text', message=None, value_kind=None)
     if verdict:
         return dict(committed=True, input_status='accepted', verification=kind or 'exact_text',
                     message=None, value_kind=kind)

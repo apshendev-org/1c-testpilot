@@ -264,7 +264,7 @@ class Client:
         return element.address
 
     def reset(self, max_windows=10):
-        """Close windows down to the start page, cancelling row edits and answering «Нет» to saving.
+        """Close windows down to the start page, cancelling row edits and open drop lists and answering «Нет» to saving.
 
         Raises ActionError reset_failed with the window that did not close.
         """
@@ -276,6 +276,13 @@ class Client:
             for table in self.find_objects(cls='Table'):
                 if table.call('current_mode_is_edit', check=False).get('edit_mode'):
                     table.call('end_edit_row', cancel=True, check=False)
+            # Открытый список подбора поля не даёт закрыть окно (window_not_closed).
+            for form in self.find_objects(cls='ManagedForm'):
+                for field in form.call('get_current_element', check=False).get('item') or []:
+                    target = dict(key=field['key'], handle=field.get('handle'))
+                    if self.call('drop_list_is_open', **target, check=False).get('open'):
+                        self.call('close_drop_list', **target, check=False)
+                        self.call('cancel_edit', **target, check=False)
             self.call('close_window', check=False)
             # Вопрос о сохранении появляется в ходе закрытия: проверка сразу, ожидание — только если окно не ушло.
             answered = self.call('answer_dialog', answer='Нет', timeout=0, check=False)
