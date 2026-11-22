@@ -50,3 +50,7 @@ include = ["compatible_scenarios*", "testpilot_assets"]
 
 [tool.setuptools.package-data]
 testpilot_assets = ["*.epf"]
+
+# Сборка из каталога (клон кита): без ключей uv пересобирает пакет только при смене pyproject.toml (spike:uv-local-cache-keys).
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "app/**/*.py" }, { file = "app/**/*.epf" }]
