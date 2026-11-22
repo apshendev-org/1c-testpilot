@@ -1219,19 +1219,36 @@ def _form_title(c, window_key):
     return None, None
 
 # ================================ соединение =================================
+def _mismatched_version(error, sent):
+    """Running client version from «Различаются версии клиента и сервера (A - B)»; None otherwise."""
+    match = re.search(r'\((\d+(?:\.\d+){3}) - (\d+(?:\.\d+){3})\)', error)
+    if not match:
+        return None
+    other = [v for v in match.groups() if v != sent]
+    return other[0] if len(other) == 1 else None
+
 @_action('tc_session')
 def tc_connect(port: int, host: str = '127.0.0.1', version: str = None) -> str:
     """Connect to a running /TESTCLIENT -TPort client using port or a list_profiles profile; explicit
     parameters override the profile. version must match the full running version (omitted: built-in
-    default). Connect before UI actions. A new host/port creates a connection; the same host/port
-    reconnects that client: connection_id is retained, but find elements again."""
+    default, then the version named by a version-mismatch refusal). Connect before UI actions.
+    A new host/port creates a connection; the same host/port reconnects that client: connection_id is retained, but find elements again."""
     host, port = _connections.endpoint(host, port)
     c = tc1c.TestClient(host, port)
     c._io_deadline = _state.get('_launch_deadline')
     if version:
         c.platform_version = version
     try:
-        sess = c.connect()
+        try:
+            sess = c.connect()
+        except tc1c.ConnectionFailure as exc:
+            # Клиент, запущенный не этим сервером (dev_ib.py client start), — своей версии платформы:
+            # её называет отказ рукопожатия, подключение повторяется с ней один раз.
+            actual = None if version else _mismatched_version(str(exc), _conn_ver(c))
+            if actual is None:
+                raise
+            c.platform_version = actual
+            sess = c.connect()
         c.attach()                          # attach (программный кадр рукопожатия)
         if getattr(c, 's', None) is not None:
             c.s.settimeout(c._recv_timeout())
@@ -2171,11 +2188,8 @@ def tc_click(key: str, handle: str, answer: str = None, expect: str = None, time
 
     def send():
         mark = _native_composite_begin(c, 'click') if _key_class(key) == 'Group' else None
-        ok = True
         try:
-            for kind in ('action', 'commit'):
-                r = c.send_cmd(guid, key, kind=kind, middle=b'', handle=handle)
-                ok = ok and r['ok']
+            ok = _send_closing(c, guid, key, handle)
         except tc1c.OperationError as exc:
             if exc.status == 8 and _key_class(key) == 'Group' and _kind_of(c, key) == 'Popup':
                 return dict(exc.result(), code='submenu_click_unsupported',
@@ -2195,6 +2209,20 @@ def tc_click(key: str, handle: str, answer: str = None, expect: str = None, time
     if ok and (READBACK or diagnostics):
         result.update(_action_diagnostics.collect(sys.modules[__name__], c, diagnostics, diagnostics_wait))
     return result
+
+def _send_closing(c, guid, key, handle):
+    """Action and commit frames of a command that may close its own window.
+
+    The accepted action frame may close the element's window («Выбрать», «Найти»): the commit then
+    finds no element. That is the effect, not a failure, when the window itself is gone."""
+    ok = c.send_cmd(guid, key, kind='action', middle=b'', handle=handle)['ok']
+    try:
+        return c.send_cmd(guid, key, kind='commit', middle=b'', handle=handle)['ok'] and ok
+    except tc1c.OperationError as exc:
+        window = key.split('.', 1)[0]
+        if exc.status != 7 or not ok or window == key or _ref_live_object(c, window) is not None:
+            raise
+        return True
 
 @_action('tc_field')
 def tc_set_check(key: str, handle: str) -> dict:
@@ -2403,12 +2431,27 @@ def tc_get_current_error() -> dict:
     """Get info about the session's last CLIENT error (none → null). error is the main description;
     details preserves additional text, including nested causes, module locations and stacks.
     Application messages (e.g. unfilled fields or posting refusal) are read with
-    tc_get_user_message_texts; they may include earlier actions."""
+    tc_get_user_message_texts; they may include earlier actions. Without a client error, an active
+    1C error window (ErrorWindow, e.g. a write refusal) supplies error and details; window is its key."""
     c = _need()
     r = c.send_cmd(G.GET_CURRENT_ERROR, None, kind='read', middle=ERR_MIDDLE, pad=4)
     vals = _vals(r)
-    return {'ok': r['ok'], 'error': vals[0] if vals else None,
-            'details': list(dict.fromkeys(vals[1:]))}
+    result = {'ok': r['ok'], 'error': vals[0] if vals else None,
+              'details': list(dict.fromkeys(vals[1:]))}
+    if r['ok'] and result['error'] is None:
+        result.update(_error_window_text(c))
+    return result
+
+def _error_window_text(c):
+    """Text of the active ErrorWindow: Message/ErrorInfo first, then other captions; {} otherwise."""
+    window = _window(c).get('key')
+    if not window or _form_title(c, window)[1] != 'ErrorWindow':
+        return {}
+    objects = [o for o in _search_objects(c, window)
+               if o.get('title') and o.get('class') not in ('Button', 'ManagedForm', 'Group')]
+    objects.sort(key=lambda o: o.get('name') not in ('Message', 'ErrorInfo'))
+    texts = list(dict.fromkeys(o['title'] for o in objects))
+    return {'error': texts[0] if texts else None, 'details': texts[1:], 'window': window}
 
 @_action('tc_app')
 def tc_get_performance(clear: bool = False) -> dict:
@@ -4335,9 +4378,7 @@ def tc_choose_row(key: str, handle: str) -> dict:
     list (a folder's own card, not its contents). changed tracks ACTIVE WINDOW change only. If
     false, read the destination field: selection may have succeeded without closing a window."""
     c = _need()
-    ok = True
-    for kind in ('action', 'commit'):
-        ok = c.send_cmd(G.CHOOSE_ROW, key, kind=kind, middle=b'', handle=handle)['ok'] and ok
+    ok = _send_closing(c, G.CHOOSE_ROW, key, handle)
     _state['window_key'] = None          # выбор строки списка открывает форму элемента
     choice = getattr(c, '_pending_text_choice', None)
     form = _batches.owner(sys.modules[__name__], key)

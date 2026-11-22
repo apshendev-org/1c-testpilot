@@ -47,17 +47,9 @@ def enrich(runtime, client, result):
         names = list(dict.fromkeys(o['name'] for o in result['elements']
                                   if o.get('name') and o['key'] != form['key']))
         requested = set(names)
-        expires = time.monotonic() + timeout
+        # A pending previous result is drained by execute before this request runs.
         response = execution.execute(runtime, client, mode='form_details', context='client',
             options=dict(form_id=form_id, items=names), timeout=timeout, check_permissions=False)
-        if response.get('code') == 'previous_execution_completed':
-            # The previous snapshot may describe another form or obsolete properties.
-            # Drain it, then request fresh details for the context being returned now.
-            timeout = expires - time.monotonic()
-            if timeout <= 0:
-                raise execution.Failure('execution_timeout', 'No time remains to read current form details.')
-            response = execution.execute(runtime, client, mode='form_details', context='client',
-                options=dict(form_id=form_id, items=names), timeout=timeout, check_permissions=False)
         if not response.get('ok'):
             status.update({k: v for k, v in response.items() if k != 'ok'})
             return

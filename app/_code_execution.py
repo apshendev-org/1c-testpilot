@@ -332,6 +332,10 @@ def forbidden(message):
     return 'запрещен запуск внешних обработок' in (message or '').lower()
 
 
+# Отказы окна, которое ещё не готово к команде: при старте повторяются до срока.
+_RETRY_CODES = ('target_not_interactive', 'invalid_element_state', 'client_busy', 'target_unavailable')
+
+
 def prepare(R, client, path, deadline):
     """Only startup may approve the exact configured file; never an arbitrary dialog."""
     old_deadline = getattr(client, '_io_deadline', None)
@@ -343,7 +347,7 @@ def prepare(R, client, path, deadline):
                 try:
                     service, objects = discover(R, client, startup=True)
                 except Failure as exc:
-                    if exc.result['code'] not in ('target_not_interactive', 'invalid_element_state', 'client_busy', 'target_unavailable'):
+                    if exc.result['code'] not in _RETRY_CODES:
                         raise
                     last_error = exc.result
                     time.sleep(min(.2, max(0, deadline - time.monotonic())))
@@ -360,26 +364,35 @@ def prepare(R, client, path, deadline):
                             and not protected(client, o.get('key'))]
                     if not work:
                         raise Failure('helper_startup_blocked', 'No application window is available outside the service form.')
-                    if work:
-                        target = next((o for o in work if o.get('class') == 'ManagedForm'), work[0])
+                    # Окно, открытое при старте (у админа — «Новости»), может отказать в активации:
+                    # пробуем остальные рабочие окна, затем повтор до срока, как в discover.
+                    work.sort(key=lambda o: o.get('class') != 'ManagedForm')
+                    activated = False
+                    for target in work:
                         try:
                             for kind in ('action', 'commit'):
                                 _checked(client.send_cmd(G.ACTIVATE, target['key'], kind=kind,
                                                         handle=target.get('handle') if target.get('class') == 'ManagedForm' else None))
-                        except tc1c.OperationError as exc:
-                            if exc.status not in (7, 9, 11, 15):
+                        except (tc1c.OperationError, Failure) as exc:
+                            code = exc.code if isinstance(exc, tc1c.OperationError) else exc.result['code']
+                            if code not in _RETRY_CODES:
                                 raise
-                            time.sleep(min(.2, max(0, deadline - time.monotonic())))
+                            last_error = dict(code=code, error=str(exc), target=target['key'])
                             continue
-                        active = R._window(client)
-                        if not active.get('key'):
-                            time.sleep(min(.2, max(0, deadline - time.monotonic())))
-                            continue
-                        if active.get('key') and protected(client, active['key']):
-                            # An empty main window can accept navigation without becoming active.
-                            # Ordinary navigation resolves it separately; the helper stays protected.
-                            if not any(o.get('class') == 'MainFrame' for o in work):
-                                raise Failure('helper_startup_blocked', 'Could not activate a work window.')
+                        activated = True
+                        break
+                    if not activated:
+                        time.sleep(min(.2, max(0, deadline - time.monotonic())))
+                        continue
+                    active = R._window(client)
+                    if not active.get('key'):
+                        time.sleep(min(.2, max(0, deadline - time.monotonic())))
+                        continue
+                    if protected(client, active['key']):
+                        # An empty main window can accept navigation without becoming active.
+                        # Ordinary navigation resolves it separately; the helper stays protected.
+                        if not any(o.get('class') == 'MainFrame' for o in work):
+                            raise Failure('helper_startup_blocked', 'Could not activate a work window.')
                     return
                 for form in [o for o in objects if o.get('form_name') == 'MessageBox']:
                     children = [o for o in objects if o.get('key', '').startswith(form['key'] + '.')]
@@ -413,6 +426,28 @@ def _remember_action_reply(pending, key, raw):
     else:
         reply = dict(ok=False, code='helper_protocol_error', error='Could not confirm the delayed execution command.')
     pending['action_reply'] = reply
+
+
+def _focus_service(R, client, service):
+    """Activate the service form when another window is active; that window is returned for restore.
+
+    A field of an inactive window refuses input, so a work form left active by the test blocks execution."""
+    root = service['form']['key'].split('.ManagedForm[', 1)[0]
+    active = R._window(client).get('key')
+    if not active or active == root:
+        return None
+    for kind in ('action', 'commit'):
+        _checked(client.send_cmd(G.ACTIVATE, service['form']['key'], kind=kind, handle=service['form'].get('handle')))
+    return active
+
+
+def _restore_window(client, key):
+    """Return the work window; a refusal must not hide the execution result."""
+    try:
+        for kind in ('action', 'commit'):
+            _checked(client.send_cmd(G.ACTIVATE, key, kind=kind, middle=b''))
+    except (tc1c.OperationError, Failure):
+        pass
 
 
 def execute(R, client, *, mode, context, code=None, query=None, parameters=None, limit=100, timeout=180,
@@ -458,6 +493,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
     client.RESYNC_TIMEOUT = timeout
     client._max_action_time = 0  # The total execution deadline governs every protocol read.
     client._io_deadline = time.monotonic() + timeout
+    restore = None
     try:
         with internal(client):
             service = vars(client).get('_testpilot_service')
@@ -465,6 +501,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
                 service, _ = discover(R, client)
             if service is None:
                 raise Failure('helper_not_ready', 'Launch the client with the configured Testpilot processing enabled.')
+            drained = None
             previous = vars(client).get('_service_pending')
             if previous:
                 if previous.get('action_pending'):
@@ -497,8 +534,8 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
                 if response.get('request_id') != previous['request_id']:
                     raise Failure('execution_pending', 'The previous execution has no matching result yet.', **previous)
                 client._service_pending = None
-                return dict(ok=False, code='previous_execution_completed',
-                            error='The previous execution completed. No new request was executed.', previous_result=response)
+                # Прежний результат прочитан; новый запрос выполняется в том же вызове, а не теряется.
+                drained = response
             if mode in ('metadata', 'function', 'form_context', 'form_details', 'form_state'):
                 from _service_metadata import function_arguments
                 capability = {'metadata': 'metadata', 'function': 'custom_functions',
@@ -516,6 +553,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
             prefix = 'Client' if context == 'client' else 'Server'
             fields = service['fields']
             client._track = None
+            restore = _focus_service(R, client, service)
             _checked(R.tc_input_html(**_address(fields[prefix + 'Request']),
                                     html='<pre>' + html.escape(payload) + '</pre>'))
             client._service_pending = dict(request_id=request_id, field=prefix + 'Result', mode=mode)
@@ -546,6 +584,8 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
                 raise Failure('helper_protocol_error', 'The helper returned a result for a different request.', request_id=request_id)
             client._service_pending = None
             response.pop('protocol', None)
+            if drained is not None:
+                response['previous_result'] = drained
             return response
     except TimeoutError:
         pending = vars(client).get('_service_pending')
@@ -558,6 +598,10 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
                           request_id=pending['request_id'], may_be_running=True) from None
         raise
     finally:
+        # Кадр без ответа (срок истёк) ещё ждёт: новых команд не шлём, окно остаётся как есть.
+        if restore and not vars(client).get('_pending'):
+            with internal(client):
+                _restore_window(client, restore)
         client._track = old_track
         client._io_deadline = old_deadline
         client._max_action_time = old_max
@@ -586,9 +630,6 @@ def form_state(R, client, form_key, names=(), timeout=30):
         return None
     response = execute(R, client, mode='form_state', context='client',
                        options=dict(form_id=identifier, items=list(names)), timeout=timeout, check_permissions=False)
-    if response.get('code') == 'previous_execution_completed':
-        response = execute(R, client, mode='form_state', context='client',
-                           options=dict(form_id=identifier, items=list(names)), timeout=timeout, check_permissions=False)
     if not response.get('ok'):
         raise Failure(response.get('code', 'helper_operation_failed'), response.get('error', 'Could not read the form state.'))
     data = response.get('result')
