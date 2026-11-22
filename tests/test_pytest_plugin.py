@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'app'))
 
 import testpilot  # noqa: E402
 import testpilot_pytest as plugin  # noqa: E402
+import _recording as recorded  # noqa: E402
 
 pytest_plugins = ['pytester']
 
@@ -202,53 +203,77 @@ def test_ref_from_navigation_link():
     assert plugin.ref_from_url('e1cib/list/Документ.Р') is None
 
 
+def recorded_windows():
+    """Окна записи спайка по ключу без повторов опроса: «Информация» и форма отчёта «Жизненный цикл ПУ»."""
+    return [w for w in {w['key']: w for w in recorded.responses('get_active_window')}.values() if w['ok']]
+
+
 class Windows(testpilot.Client):
-    """Client.reset over a scripted window stack."""
+    """Client.reset: ответы действий — из записи спайка report-date-droplist (MCP ref → key), окна — стек сценария.
+
+    Из записи: состояние списка подбора (открыт, после close_drop_list — закрыт), отказ close_window
+    при открытом списке (window_not_closed) и no_dialog на вопрос о сохранении. Исключение — closed
+    в удачном close_window: это окно сценария; для верхнего окна записи значение совпадает с записанным.
+    """
 
     def __init__(self, windows, stuck=False):
         self.windows, self.stuck, self.calls = windows, stuck, []
-
-    drop_list = False
+        self.drop_list = recorded.responses('drop_list_is_open')[0]['open']  # записано: список открыт
+        self.form = recorded.responses('get_current_element')[0]
 
     def find_objects(self, **criteria):
-        return [Form()] if criteria.get('cls') == 'ManagedForm' else []
+        return [Form(self.form)] if criteria.get('cls') == 'ManagedForm' else []
 
     def call(self, action, check=True, **kw):
         self.calls.append((action, kw.get('answer')))
         if action == 'get_active_window':
             return self.windows[-1]
         if action == 'drop_list_is_open':
-            return {'ok': True, 'open': self.drop_list}
+            states = recorded.responses('drop_list_is_open')
+            return states[0] if self.drop_list else states[-1]  # записаны open: true и open: false
         if action == 'close_drop_list':
             self.drop_list = False
-        if action == 'close_window' and not self.stuck and not self.drop_list:
-            self.windows.pop()
-        return {'ok': action != 'answer_dialog'}
+            return recorded.responses('close_drop_list')[0]
+        if action == 'cancel_edit':
+            return recorded.responses('cancel_edit')[0]
+        if action == 'close_window':
+            refused, closed = recorded.responses('close_window')
+            if self.stuck or self.drop_list:
+                return dict(refused)  # записанный отказ window_not_closed при открытом списке
+            return dict(closed, closed=self.windows.pop()['key'])
+        if action == 'answer_dialog':
+            return recorded.responses('answer_dialog')[0]  # записано: no_dialog
+        raise AssertionError(f'действия нет в записи спайка: {action}')
 
 
 class Form:
-    """Form of the active window whose current element is a field."""
+    """Форма отчёта записи: текущий элемент — поле «Отбор» (записанный ответ get_current_element)."""
+
+    def __init__(self, response):
+        self.response = response
 
     def call(self, action, check=True, **kw):
-        return {'ok': True, 'item': [{'key': 'Field', 'handle': 'h'}]}
+        assert action == 'get_current_element'
+        return dict(self.response)
 
 
 def test_reset_closes_windows_to_start_page():
-    client = Windows([dict(key='Home', home_page=True), dict(key='List'), dict(key='Doc', title='Реализация')])
+    client = Windows([dict(key='Home', home_page=True)] + recorded_windows())
     assert client.reset()['key'] == 'Home'
     assert client.calls.count(('close_window', None)) == 2 and ('answer_dialog', 'Нет') in client.calls
 
 
 def test_reset_reports_window_that_did_not_close():
-    client = Windows([dict(key='Home', home_page=True), dict(key='Doc', title='Реализация')], stuck=True)
+    client = Windows([dict(key='Home', home_page=True), recorded_windows()[-1]], stuck=True)
     with pytest.raises(testpilot.ActionError) as error:
         client.reset(max_windows=2)
-    assert error.value.code == 'reset_failed' and error.value.result['window']['key'] == 'Doc'
+    assert error.value.code == 'reset_failed'
+    assert error.value.result['window']['key'] == recorded_windows()[-1]['key']
 
 
 def test_reset_closes_open_drop_list_before_window():
-    client = Windows([dict(key='Home', home_page=True), dict(key='Doc', title='Контракт')])
-    client.drop_list = True
+    # Начальное состояние из записи: список подбора открыт (drop_list_is_open → open: true).
+    client = Windows([dict(key='Home', home_page=True), recorded_windows()[-1]])
     assert client.reset()['key'] == 'Home'
     actions = [a for a, _ in client.calls]
     assert actions.index('close_drop_list') < actions.index('cancel_edit') < actions.index('close_window')

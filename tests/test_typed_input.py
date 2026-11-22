@@ -10,6 +10,7 @@ import _runtime as R  # noqa: E402
 import _typed_input as T  # noqa: E402
 import _value_selection as V  # noqa: E402
 import _field_batches as B  # noqa: E402
+import _recording as recorded  # noqa: E402
 
 SERVICE = dict(separators={'Fractions': ',', 'Groups': '\xa0'}, date_sample='22.11.2004 17:48:59')
 DATE = {'$type': 'date', 'value': '2026-01-15T00:00:00'}
@@ -44,12 +45,18 @@ def test_verdict_rejects_string_suffix(monkeypatch):
 
 
 def test_verdict_unknown_type_accepts_same_date(monkeypatch):
+    """Записанный ввод даты в поле компоновщика (спайк report-date-droplist): тип поля не прочитан
+    (value_kind: null), поле показывает «01.01.2026 0:00:00» — по спецификации ввод принят,
+    verification: date_text (запись — поведение клиента 1С до правки, там ещё value_mismatch)."""
+    entered = recorded.responses('input_text')[0]
+    assert entered['value_kind'] is None  # тип не прочитан — заглушка field_value отвечает (None, None)
     c = SimpleNamespace(_testpilot_service=SERVICE)
     monkeypatch.setattr(T, 'field_value', lambda S, c, key: (None, None))
-    accepted = R._typed_verdict(c, 'F.EditField[КомпоновщикНастроекПользовательскиеНастройкиЭлемент0Значение]',
-                                '01.01.2026', '01.01.2026 0:00:00')
+    accepted = R._typed_verdict(c, entered['target'], entered['text'], entered['data_presentation'])
     assert accepted['committed'] is True and accepted['verification'] == 'date_text'
-    assert R._typed_verdict(c, 'F.EditField[Поле]', '01.01.2026', '02.01.2026 0:00:00')['code'] == 'value_mismatch'
+    # Не-дата — точное равенство строк: записанное value_before «Начало этого года» — value_mismatch.
+    mismatch = R._typed_verdict(c, entered['target'], entered['text'], entered['value_before'])
+    assert mismatch['code'] == 'value_mismatch' and mismatch['actual'] == entered['value_before']
 
 
 def test_verdict_without_helper_is_exact_text(monkeypatch):
