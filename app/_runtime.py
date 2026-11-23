@@ -1490,8 +1490,11 @@ def _launch_failure(proc, desktop, user):
         title = login_dialog(proc.pid)
         if title:
             return {'code': 'login_failed', 'dialog': title,
-                    'error': '1C opened the infobase login dialog: user %s is not in the infobase or the password '
-                             'is wrong. Check the profile user and password.' % (repr(user) if user else '(none)')}
+                    'error': '1C rejected the login and opened the infobase login dialog (profile %s, user %s): the '
+                             'user is not in the infobase, the password is wrong or was not passed, or the user may '
+                             'lack the right to log in. Check the profile user and password.'
+                             % (repr(_state.get('profile')) if _state.get('profile') else '(none)',
+                                repr(user) if user else '(none)')}
     return None
 
 
