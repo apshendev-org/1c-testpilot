@@ -15,5 +15,5 @@
 
 ## 3. Проверка
 
-- [ ] 3.1 Живой прогон сценария `stale` на паре WS с кодом ветки
+- [x] 3.1 Живой прогон сценария `stale` на паре WS с кодом ветки: `execute_command` вернул то же окно за 327 мс с `refreshed: true`, первый `goto_row` — `found: true`
 - [ ] 3.2 Тесты testpilot, `payload/tests`, `openspec validate --all --strict`
