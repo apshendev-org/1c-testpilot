@@ -1,17 +1,26 @@
 """Загрузчик записи спайка testpilot-report-recording: ответы живого клиента 1С для заглушек тестов.
 
-Запись docs/spikes/testpilot-report-recording/recording/report-date-droplist.jsonl — JSONL обмена
-agent↔proxy сеанса MCP testpilot на WS (строка {ms, dir, msg}); ответ инструмента — текст
-result.content[0].text строками «ключ: значение». MCP адресует элементы ref; Client.call и действия
-runtime получают те же ответы с key/handle вместо ref (перевод ref ↔ key в _runtime.py).
+Запись — JSONL обмена agent↔proxy сеанса MCP testpilot на WS (строка {ms, dir, msg}); ответ
+инструмента — текст result.content[0].text строками «ключ: значение». MCP адресует элементы ref;
+Client.call и действия runtime получают те же ответы с key/handle вместо ref (перевод ref ↔ key
+в _runtime.py). По умолчанию — docs/spikes/testpilot-report-recording/recording/report-date-droplist.jsonl;
+записи спайка goto-row (docs/spikes/testpilot-goto-row-list-load/recording/) — по имени ниже.
 """
 import json
 import re
 from pathlib import Path
 
-# Копия записи рядом с тестами: testpilot уходит в форк 1c-testpilot без docs/ кита; совпадение проверяет
+# Копии записей рядом с тестами: testpilot уходит в форк 1c-testpilot без docs/ кита; совпадение проверяет
 # payload/tests/test_spike_recordings.py.
-RECORDING = Path(__file__).resolve().parent / 'recordings' / 'report-date-droplist.jsonl'
+RECORDINGS = Path(__file__).resolve().parent / 'recordings'
+RECORDING = RECORDINGS / 'report-date-droplist.jsonl'
+# Прогон 2 спайка goto-row: список открыт до фикстуры, execute_command возвращает то же окно.
+STALE_WINDOW = RECORDINGS / 'goto-row-stale-window.jsonl'
+# Прогон 3: то же + чтение кнопки ФормаОбновить и её нажатие (список обновился).
+REFRESH = RECORDINGS / 'goto-row-refresh.jsonl'
+# Прогон 1: фикстура создаёт документ, затем первое открытие списка — окно новое.
+FIXTURE = RECORDINGS / 'goto-row-fixture.jsonl'
+PRELOADED = RECORDINGS / 'goto-row-preloaded.jsonl'
 
 
 def _indent(line):
@@ -74,13 +83,15 @@ def _parse(text):
     return _rename_refs(value)
 
 
-def exchange():
+def exchange(path=RECORDING):
     """Запись как последовательность вызовов инструментов: {tool, action, arguments, response}."""
     pending, calls = {}, []
-    for line in RECORDING.read_text(encoding='utf-8').splitlines():
+    for line in Path(path).read_text(encoding='utf-8').splitlines():
         if not line.strip():
             continue
-        msg = json.loads(line)['msg']
+        msg = json.loads(line).get('msg')
+        if not isinstance(msg, dict):
+            continue                     # этап прогона: {ms, dir: "note", note}
         if msg.get('method') == 'tools/call':
             pending[msg['id']] = msg['params']
         elif 'result' in msg and msg.get('id') in pending:
@@ -91,6 +102,6 @@ def exchange():
     return calls
 
 
-def responses(action):
+def responses(action, path=RECORDING):
     """Ответы записи для действия runtime (Client.call) в порядке записи, уже с key вместо ref."""
-    return [call['response'] for call in exchange() if call['action'] == action]
+    return [call['response'] for call in exchange(path) if call['action'] == action]
