@@ -45,6 +45,24 @@ def active_secondary_window(pid):
     return found[0] if len(found) == 1 else None
 
 
+# shortcut: заголовок русской платформы 8.3.27 (spike:spk_13e59c8b2b@v1); английский добавить, когда встретится живьём.
+LOGIN_TITLES = ('Доступ к информационной базе',)
+
+
+def login_dialog(pid):
+    """Заголовок окна входа в базу процесса pid или None: 1С открывает его при неизвестном логине или неверном пароле."""
+    found = []
+    def inspect(hwnd, _):
+        if (win32process.GetWindowThreadProcessId(hwnd)[1] == pid and win32gui.IsWindowVisible(hwnd)
+                and not win32gui.GetWindow(hwnd, 4) and win32gui.GetWindowText(hwnd) in LOGIN_TITLES):  # 4 = GW_OWNER
+            found.append(win32gui.GetWindowText(hwnd))
+    try:
+        win32gui.EnumWindows(inspect, None)
+    except win32gui.error:
+        return None
+    return found[0] if found else None
+
+
 def close_secondary_window(window):
     current = active_secondary_window(window['pid'])
     if current is None or current['hwnd'] != window['hwnd']:

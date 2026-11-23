@@ -336,13 +336,17 @@ def forbidden(message):
 _RETRY_CODES = ('target_not_interactive', 'invalid_element_state', 'client_busy', 'target_unavailable')
 
 
-def prepare(R, client, path, deadline):
-    """Only startup may approve the exact configured file; never an arbitrary dialog."""
+def prepare(R, client, path, deadline, stop=None):
+    """Only startup may approve the exact configured file; never an arbitrary dialog.
+    stop() returns a startup failure (code, error, details) that waiting cannot fix, or None."""
     old_deadline = getattr(client, '_io_deadline', None)
     client._io_deadline = deadline
     last_error = None
     try:
         while time.monotonic() < deadline:
+            failure = stop() if stop else None
+            if failure:
+                raise Failure(failure.pop('code'), failure.pop('error'), **failure)
             with internal(client):
                 try:
                     service, objects = discover(R, client, startup=True)

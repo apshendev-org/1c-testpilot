@@ -1325,7 +1325,8 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
     line. exe is the full path to 1cv8/1cv8c (with .exe on Windows); omitted: configured or auto-detected
     installation. A version prefix selects the latest matching build; use a full version or exe for
     an exact build. Omitted port allocates a free local port; each launch creates a connection_id.
-    wait covers total startup including readiness; increase for slow bases. Linux default needs
+    wait covers total startup including readiness; increase for slow bases. An infobase login dialog
+    (unknown user, wrong password) or client exit fails at once: login_failed, client_exited. Linux default needs
     DISPLAY/XAUTHORITY; isolated needs Xvfb. isolated uses a separate desktop (Windows 10+/Linux)
     and stops with the server. connect=false confirms only an answering port, not a usable client."""
     if desktop not in ('default', 'isolated'):
@@ -1452,16 +1453,17 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
                 break
             except Exception as e:
                 # 1C opens its socket before it accepts attach while loading the infobase.
-                if proc.poll() is not None or time.monotonic() >= deadline:
-                    out['ok'] = False
-                    out['connect_error'] = str(e)
+                failure = _launch_failure(proc, desktop, user)
+                if failure or time.monotonic() >= deadline:
+                    out.update(failure or {}, ok=False, connect_error=str(e))
                     break
                 time.sleep(max(0, min(0.5, deadline - time.monotonic())))
             finally:
                 _state.pop('_launch_deadline', None)
     if helper_path and connect and out['ok']:
         try:
-            _code_execution.prepare(sys.modules[__name__], _state['client'], helper_path, deadline)
+            _code_execution.prepare(sys.modules[__name__], _state['client'], helper_path, deadline,
+                                    stop=lambda: _launch_failure(proc, desktop, user))
             out['execution_ready'] = True
         except _code_execution.Failure as exc:
             if exc.result['code'] == 'helper_forbidden':
@@ -1474,6 +1476,23 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
     elif helper_path:
         out['execution_ready'] = False
     return _finish_client_launch(out)
+
+
+def _launch_failure(proc, desktop, user):
+    """Отказ старта, который не пройдёт ожиданием: процесс 1С вышел или открыл окно входа в базу."""
+    if proc.poll() is not None:
+        return {'code': 'client_exited',
+                'error': 'The test client exited (code %s) during startup — check the base, credentials and flags.'
+                % proc.returncode}
+    # shortcut: окно входа ищется только на Windows в обычном рабочем столе; Linux и isolated — по живой записи.
+    if os.name == 'nt' and desktop == 'default':
+        from _native_window import login_dialog
+        title = login_dialog(proc.pid)
+        if title:
+            return {'code': 'login_failed', 'dialog': title,
+                    'error': '1C opened the infobase login dialog: user %s is not in the infobase or the password '
+                             'is wrong. Check the profile user and password.' % (repr(user) if user else '(none)')}
+    return None
 
 
 def _finish_client_launch(result):
