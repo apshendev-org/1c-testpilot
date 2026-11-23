@@ -1,17 +1,24 @@
-"""Старт клиента при неудачном входе и при выходе процесса — отказ сразу (изменение login-fail-fast).
+"""Старт клиента при неудачном входе и при выходе процесса — отказ сразу (изменения login-fail-fast
+и login-no-rights).
 
 Сценарии client-launch-cli проверяются по записи живой системы: окна процесса 1С, ошибки
 discover и итог старта взяты из docs/spikes/testpilot-login-fail-fast/recording/login-failed.jsonl
-(случаи no_user, bad_password) и docs/spikes/testpilot-login-fail-fast/recording/slow-start.jsonl
-(обычный долгий старт). Копии записей в tests/recordings/ байт в байт (testpilot уходит в форк
+(случаи no_user, bad_password), docs/spikes/testpilot-login-fail-fast/recording/slow-start.jsonl
+(обычный долгий старт) и docs/spikes/testpilot-login-fail-fast/recording/no-rights.jsonl
+(spike:spk_13e59c8b2b@v2, случай no_rights — окно ошибки старта «Нет прав на запуск требуемого
+вида клиента» поверх заставки). Копии записей в tests/recordings/ байт в байт (testpilot уходит в форк
 без docs/ кита, совпадение проверяет payload/tests/test_spike_recordings.py). Windows-модули
-win32gui/win32process подменены перечислителем записанных окон: реальная логика login_dialog,
-_launch_failure и prepare(stop=) работает против записи. Платформе выставлен os.name='nt' —
-запись снята на Windows обычного рабочего стола, окно входа там и ищется.
+win32gui/win32process подменены перечислителем записанных окон: реальная логика login_dialog и
+refusal, _launch_failure и prepare(stop=) работает против записи. Окна v2 записей хранят свой pid
+и видимость — EnumWindows отдаёт снимок целиком, с чужими клиентами 1cv8* и скрытыми окнами, как
+в живом перечислении. Платформе выставлен os.name='nt' — запись снята на Windows обычного рабочего
+стола, окна входа и ошибки там и ищутся.
 """
+import hashlib
 import inspect
 import json
 import os
+import random
 import socket
 import subprocess
 import sys
@@ -43,7 +50,7 @@ class FakeWin32Gui:
 
     @staticmethod
     def IsWindowVisible(hwnd):
-        return True
+        return WINDOWS[hwnd][1].get('visible', True)  # v2 записи: видимость каждого окна
 
     @staticmethod
     def GetWindowText(hwnd):
@@ -79,6 +86,9 @@ import server as R  # noqa: E402
 
 RECORDINGS = Path(__file__).resolve().parent / 'recordings'
 LOGIN_DIALOG_TITLE = 'Доступ к информационной базе'
+SPLASH_TITLE = 'Загрузка конфигурационной информации...'
+ERROR_WINDOW_TITLE = '1С:Предприятие'
+ERROR_WINDOW_AT = 124.9  # окно ошибки в no-rights.jsonl появляется на 124,93 с; до этого — заставка
 DISCOVER_ERROR = 'Could not read application windows; retry the search.'
 MAIN_WINDOW_TITLE = 'DEV / Бухгалтерия государственного учреждения, редакция 2.0'
 # Причины отказа входа из требования: нет пользователя, пароль неверный или не передан, нет права входа.
@@ -86,10 +96,15 @@ REASONS = ('not in the infobase', 'password is wrong or was not passed', 'right 
 
 
 def show(pid, windows):
-    """Показать процессу pid снимок окон из записи."""
+    """Показать снимок окон из записи: окна v2 записей хранят свой pid, остальным назначается pid."""
     WINDOWS.clear()
     for window in windows:
-        WINDOWS[window['hwnd']] = (pid, window)
+        WINDOWS[window['hwnd']] = (window.get('pid', pid), window)
+
+
+def visible_own(row):
+    """Видимые верхние окна процесса из снимка записи — то, что login_dialog передаёт в refusal."""
+    return [w for w in row['windows'] if w.get('visible', True) and w.get('pid', row['pid']) == row['pid']]
 
 
 def records(name, case=None, kind=None, t=None):
@@ -366,3 +381,126 @@ def test_prepare_reports_refusal_from_stop(monkeypatch, fake_time):
                                 'dialog': LOGIN_DIALOG_TITLE}
     assert len(rounds) == 3                  # stop() на каждом круге, отказ прекращает ожидание
     assert fake_time[0] < 600
+
+
+def test_startup_error_window_is_a_refusal_and_constants():
+    # «Нет прав на запуск клиента» (спайк v2): окно ошибки V8NewLocalFrameBaseWnd с владельцем
+    # при видимой заставке и без главного окна процесса — отказ с заголовком окна.
+    assert _native_window.LOGIN_TITLES == (LOGIN_DIALOG_TITLE,)
+    assert _native_window.SPLASH_TITLES == (SPLASH_TITLE,)
+    assert _native_window.STARTUP_ERROR_CLASS == 'V8NewLocalFrameBaseWnd'
+    alive = [r for r in records('no-rights.jsonl', kind='process') if r.get('alive')]
+    refusal_row = next(r for r in alive
+                       if any(w['class'] == _native_window.STARTUP_ERROR_CLASS for w in r['windows']))
+    assert refusal_row['t'] >= ERROR_WINDOW_AT
+    assert _native_window.refusal(visible_own(refusal_row)) == ERROR_WINDOW_TITLE
+    # login_dialog(pid) отбирает окна записи по pid строки: чужие клиенты WS (главное окно
+    # «DEV / Бухгалтерия…» другого процесса) и скрытые окна процесса не мешают отказу.
+    show(refusal_row['pid'], refusal_row['windows'])
+    assert _native_window.login_dialog(refusal_row['pid']) == ERROR_WINDOW_TITLE
+    assert _native_window.login_dialog(64628) is None  # чужой процесс со своим главным окном — не отказ
+
+
+def test_splash_before_error_window_is_not_a_refusal():
+    # «Заставка до окна ошибки» (t < 124,9): заставка и чужие окна — ещё не отказ.
+    checked = 0
+    for row in records('no-rights.jsonl', kind='process'):
+        if not row.get('alive') or row['t'] >= ERROR_WINDOW_AT:
+            continue
+        assert _native_window.refusal(visible_own(row)) is None, row['t']
+        show(row['pid'], row['windows'])
+        assert _native_window.login_dialog(row['pid']) is None, row['t']
+        checked += 1
+    assert checked >= 2                      # в записи есть снимки заставки до окна ошибки
+
+
+def test_login_window_still_refuses_after_change():
+    # «Пользователя нет / неверный пароль» (v1 записи): отказ по-прежнему окно входа,
+    # окно ошибки старту не нужно — заставка и главное окно записи не отказ.
+    for case in ('no_user', 'bad_password'):
+        row = snapshot('login-failed.jsonl', case)
+        assert _native_window.refusal(visible_own(row)) == LOGIN_DIALOG_TITLE
+
+
+def test_slow_start_snapshots_never_refuse():
+    # «Долгий обычный старт»: ни один снимок slow-start.jsonl не отказ — заставка, главное окно
+    # и окна уведомлений не выглядят как отказ входа.
+    for row in records('slow-start.jsonl', kind='process'):
+        assert _native_window.refusal(visible_own(row)) is None, (row['t'], row.get('alive'))
+
+
+def test_no_rights_error_window_fails_at_once(monkeypatch, tmp_path, fake_time):
+    # «Нет прав на запуск клиента»: окно ошибки поверх заставки на круге ожидания — login_failed
+    # с заголовком окна, error называет профиль, логин и пример текста 1С; процесс и окно
+    # закрываются до ответа, без ожидания wait.
+    spawned = records('no-rights.jsonl', case='no_rights', kind='spawned')[0]
+    connected = records('no-rights.jsonl', kind='tc_connect')[0]['result']
+    alive = [r for r in records('no-rights.jsonl', kind='process') if r.get('alive')]
+    splash = next(r['windows'] for r in alive if r['t'] < ERROR_WINDOW_AT)
+    dialog = next(r['windows'] for r in alive
+                  if any(w['class'] == _native_window.STARTUP_ERROR_CLASS for w in r['windows']))
+    proc, stops, exe = recorded_launch(monkeypatch, tmp_path, spawned['pid'], connected)
+    R._state['profile'] = 'роль:rmzds_admin'
+    search, shown = stop_on_recorded_windows(spawned['pid'], [splash, dialog])
+    monkeypatch.setattr(R, '_search_objects', search)
+    show(spawned['pid'], splash)             # стартовое состояние: процесс уже показывает заставку
+
+    result = launch(exe, base=spawned['cmdline'][2][2:], user='rmzds_admin', wait=300)
+
+    assert result['ok'] is False
+    assert result['code'] == 'login_failed'
+    assert result['dialog'] == ERROR_WINDOW_TITLE
+    assert 'роль:rmzds_admin' in result['error']
+    assert "'rmzds_admin'" in result['error']
+    assert 'Нет прав на запуск требуемого вида клиента' in result['error']
+    assert 'not readable' in result['error']  # текст окна 1С через Win32 не читается — error так и говорит
+    assert result['client_stopped'] is True
+    assert proc.poll() is not None           # процесса 1С нет
+    assert stops == [0]                      # остановка форсированная, до ответа
+    assert len(shown) == 2                   # отказ после появления окна ошибки, не по сроку
+    assert fake_time[0] < 300
+
+
+FUZZ_NOISE = ('\x1b[31m', '\x1b]0;окно\x07', '\r\n', '\n', '\x00', '́', '​', 'ё', '…', 'АБВ')
+
+
+def _fuzz_mutate(rng, base, corpus):
+    """Шум по правилу кита: обрыв и Юникод в заголовках и классах, лишние и пропавшие окна, порядок."""
+    windows = [dict(w) for w in base if rng.random() > 0.15]          # пропавшие окна
+    if corpus and rng.random() < 0.5:
+        windows.append(dict(rng.choice(corpus)))                      # лишние окна
+    for window in windows:
+        for field in ('title', 'class'):
+            value = window[field]
+            if rng.random() < 0.4:
+                value = value[:rng.randint(0, len(value))]            # обрыв
+            if rng.random() < 0.4:
+                value = rng.choice(FUZZ_NOISE) + value + rng.choice(FUZZ_NOISE)
+            window[field] = value
+    rng.shuffle(windows)
+    return windows
+
+
+def test_refusal_fuzz_no_crash_and_no_invented_titles():
+    # Разбор видимых окон (все три записи) не падает исключением на шуме записей
+    # и не выдаёт заголовка, которого нет во входе; зерно — FUZZ_SEED или время — в тексте падения.
+    raw = os.environ.get('FUZZ_SEED') or str(time.time_ns())
+    seed = int(raw) if raw.lstrip('-').isdigit() else int(hashlib.sha256(raw.encode()).hexdigest()[:16], 16)
+    rng = random.Random(seed)
+    corpus, bases = [], []
+    for name in ('login-failed.jsonl', 'slow-start.jsonl', 'no-rights.jsonl'):
+        for row in records(name, kind='process'):
+            visible = visible_own(row)
+            corpus += visible
+            if visible:
+                bases.append(visible)
+    assert any(_native_window.refusal(base) for base in bases)  # во входах есть настоящий отказ
+    for step in range(200):
+        windows = _fuzz_mutate(rng, rng.choice(bases), corpus)
+        try:
+            result = _native_window.refusal(windows)
+        except Exception as exc:  # разбор не падает исключением
+            pytest.fail(f'seed={seed} шаг {step}: refusal упал {exc!r} на {windows!r}')
+        titles = {w['title'] for w in windows}
+        assert result is None or result in titles, \
+            f'seed={seed} шаг {step}: refusal вернул заголовок не из входа: {result!r}'
