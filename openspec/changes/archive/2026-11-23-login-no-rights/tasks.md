@@ -13,8 +13,8 @@
 | Пользователя нет / неверный пароль | `login-failed.jsonl` | по-прежнему `login_failed` с окном входа |
 | Разбор окон | все три записи | fuzzing `refusal`: шум в заголовках и классах, лишние и пропавшие окна, порядок окон — без исключений, ответ — только заголовок из входа или `None` |
 
-- [ ] 2.1 Тесты по матрице, копия `no-rights.jsonl` в `tests/recordings/`
+- [x] 2.1 Тесты по матрице, копия `no-rights.jsonl` в `tests/recordings/`
 
 ## 3. Проверка
 
-- [ ] 3.1 Тесты testpilot, `payload/tests`, `openspec validate --all --strict`
+- [x] 3.1 Тесты testpilot, `payload/tests`, `openspec validate --all --strict`
