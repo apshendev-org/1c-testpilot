@@ -1486,15 +1486,22 @@ def _launch_failure(proc, desktop, user):
                 % proc.returncode}
     # shortcut: окно входа ищется только на Windows в обычном рабочем столе; Linux и isolated — по живой записи.
     if os.name == 'nt' and desktop == 'default':
-        from _native_window import login_dialog
+        from _native_window import LOGIN_TITLES, login_dialog
         title = login_dialog(proc.pid)
         if title:
-            return {'code': 'login_failed', 'dialog': title,
-                    'error': '1C rejected the login and opened the infobase login dialog (profile %s, user %s): the '
-                             'user is not in the infobase, the password is wrong or was not passed, or the user may '
-                             'lack the right to log in. Check the profile user and password.'
-                             % (repr(_state.get('profile')) if _state.get('profile') else '(none)',
-                                repr(user) if user else '(none)')}
+            who = 'profile %s, user %s' % (repr(_state.get('profile')) if _state.get('profile') else '(none)',
+                                           repr(user) if user else '(none)')
+            if title in LOGIN_TITLES:
+                error = ('1C rejected the login and opened the infobase login dialog (%s): the user is not in the '
+                         'infobase, the password is wrong or was not passed, or the user lacks the right to log in. '
+                         'Check the profile user and password.' % who)
+            else:
+                # Текст окна через Win32 не читается (spike:spk_13e59c8b2b@v2): называем то, что 1С пишет в этом случае.
+                error = ('1C refused the login before opening the session and showed the error window «%s» (%s), '
+                         'for example «Нет прав на запуск требуемого вида клиента»: the user lacks the right to start '
+                         'this client or to log in. The window text is not readable; check the user\'s roles '
+                         'and the profile password.' % (title, who))
+            return {'code': 'login_failed', 'dialog': title, 'error': error}
     return None
 
 

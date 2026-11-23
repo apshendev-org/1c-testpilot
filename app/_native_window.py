@@ -47,20 +47,37 @@ def active_secondary_window(pid):
 
 # shortcut: заголовок русской платформы 8.3.27 (spike:spk_13e59c8b2b@v1); английский добавить, когда встретится живьём.
 LOGIN_TITLES = ('Доступ к информационной базе',)
+# Отказ до сеанса (нет прав на запуск клиента): окно сообщения поверх заставки, главного окна нет (spike:spk_13e59c8b2b@v2).
+SPLASH_TITLES = ('Загрузка конфигурационной информации...',)
+STARTUP_ERROR_CLASS = 'V8NewLocalFrameBaseWnd'
+
+
+def refusal(windows):
+    """Заголовок окна отказа входа среди видимых верхних окон процесса ({class, title, owner}) или None."""
+    for w in windows:
+        if not w['owner'] and w['title'] in LOGIN_TITLES:
+            return w['title']
+    splash = any(w['class'] == 'V8TopLevelFrameSDI' and w['title'] in SPLASH_TITLES for w in windows)
+    main = any(w['class'] == 'V8TopLevelFrameSDI' and w['title'] not in SPLASH_TITLES for w in windows)
+    if splash and not main:
+        for w in windows:
+            if w['class'] == STARTUP_ERROR_CLASS and w['owner']:
+                return w['title']
+    return None
 
 
 def login_dialog(pid):
-    """Заголовок окна входа в базу процесса pid или None: 1С открывает его при неизвестном логине или неверном пароле."""
-    found = []
+    """Заголовок окна отказа входа процесса pid или None: окно входа в базу или ошибка старта поверх заставки."""
+    windows = []
     def inspect(hwnd, _):
-        if (win32process.GetWindowThreadProcessId(hwnd)[1] == pid and win32gui.IsWindowVisible(hwnd)
-                and not win32gui.GetWindow(hwnd, 4) and win32gui.GetWindowText(hwnd) in LOGIN_TITLES):  # 4 = GW_OWNER
-            found.append(win32gui.GetWindowText(hwnd))
+        if win32process.GetWindowThreadProcessId(hwnd)[1] == pid and win32gui.IsWindowVisible(hwnd):
+            windows.append({'class': win32gui.GetClassName(hwnd), 'title': win32gui.GetWindowText(hwnd),
+                            'owner': win32gui.GetWindow(hwnd, 4)})  # 4 = GW_OWNER
     try:
         win32gui.EnumWindows(inspect, None)
     except win32gui.error:
         return None
-    return found[0] if found else None
+    return refusal(windows)
 
 
 def close_secondary_window(window):
