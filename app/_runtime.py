@@ -3484,7 +3484,8 @@ def tc_execute_command(command: str) -> dict:
     """Open a navigation link, e.g. 'e1cib/list/Справочник.Контрагенты', 'e1cib/app/Обработка.Имя'
     or a URL returned by the command interface. For a button name or title, find it and use click.
     Returns the resulting window; window_changed=false reuses the previous window description.
-    An opened error window is a failure."""
+    An opened error window is a failure. When 1C returns an already open window with the ФормаОбновить
+    button, it is pressed so the list shows current data: refreshed=true."""
     c = _need()
     if not isinstance(command, str) or not re.fullmatch(
             r'(?:e1cib/\S.*|(?:e1c|https?)://\S.*)', command.strip(), re.IGNORECASE) or any(
@@ -3495,6 +3496,10 @@ def tc_execute_command(command: str) -> dict:
                 'message': 'Find the button by name or title, then call click on its ref.'}
     command = command.strip()
     wk = _winkey(c); ok = True
+    try:
+        opened = {w.get('key') for w in _read_open_windows(c)}
+    except Exception:
+        opened = set()                   # не прочитали окна — не обновляем, как раньше
     for kind in ('action', 'commit'):
         ok = c.send_cmd(G.EXECUTE_COMMAND, wk, kind=kind, middle=tc1c.mk_command(command))['ok'] and ok
     _state['window_key'] = None          # команда могла открыть/переключить окно
@@ -3514,6 +3519,16 @@ def tc_execute_command(command: str) -> dict:
                                   error='1C opened an error window instead of completing navigation.',
                                   suggested_action='find_objects',
                                   message='Read the fields of the returned error window for details.')
+                elif window['key'] in opened:
+                    # 1С активирует открытое окно списка без перечитывания: данные после его открытия не видны
+                    try:
+                        button = _find(c, name='ФормаОбновить', cls='Button', root_key=window['key'])
+                        pressed = button and tc_click(**{k: button[0][k] for k in ('key', 'handle')},
+                                                      expect='none')
+                        if pressed and pressed.get('ok') and not pressed.get('target_hidden'):
+                            result['refreshed'] = True
+                    except Exception:
+                        pass                     # обновление — попутное: окно уже открыто, как раньше
             else:
                 result['verification'] = 'window_unavailable'
         except Exception:
