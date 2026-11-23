@@ -13,8 +13,8 @@
 | Процесс вышел во время подготовки | — | `client_exited` до срока |
 | Долгий обычный старт | `slow-start.jsonl` | окна загрузки и главное — не отказ, `ok: true` |
 
-- [ ] 2.1 Тесты по матрице, копии записей в `tests/recordings/`
+- [x] 2.1 Тесты по матрице, копии записей в `tests/recordings/`
 
 ## 3. Проверка
 
-- [ ] 3.1 Тесты testpilot, `payload/tests`, `openspec validate --all --strict`
+- [x] 3.1 Тесты testpilot, `payload/tests`, `openspec validate --all --strict`
