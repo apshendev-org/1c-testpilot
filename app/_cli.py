@@ -48,7 +48,7 @@ def client_start(profile):
         result = client.start()
     except ActionError as exc:
         # Неудачный запуск launch_client уже остановил свой процесс.
-        _emit({k: v for k, v in exc.result.items() if k in ('code', 'error', 'dialog', 'connect_error', 'pid', 'client_stopped')}
+        _emit({k: v for k, v in exc.result.items() if k in ('code', 'error', 'dialog', 'connect_error', 'pid', 'client_stopped', 'cleanup_error')}
               | dict(ok=False, code=exc.code), sys.stderr)
         return 1
     # Отключение, а не close(): процесс 1С продолжает работать для pytest и MCP.

@@ -1407,6 +1407,7 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
     _state['launched_pid'] = proc.pid
     _state['launched_process'] = proc
     _state['launched_port'] = port      # чтобы tc_stop_client закрыл соединение именно с ним
+    _state['launched_version'] = version   # для отказа client_version_mismatch
     _state['_code_launch_path'] = helper_path
     up = False
     while time.monotonic() < deadline:
@@ -1414,6 +1415,9 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
             if desktop == 'isolated':
                 return _finish_client_launch({'ok': False, 'pid': proc.pid, 'desktop': desktop,
                     'error': 'The isolated test client exited (code %s).' % proc.returncode})
+            if _relaunched_clients(proc.pid, port):
+                return _finish_client_launch({'ok': False, 'pid': proc.pid, 'desktop': desktop, 'code': 'client_exited',
+                    'error': 'The test client exited (code %s) during startup.' % proc.returncode})
             _state['launched_pid'] = None
             _state.pop('launched_process', None)
             _state.pop('launched_port', None)
@@ -1505,11 +1509,46 @@ def _launch_failure(proc, desktop, user):
     return None
 
 
+def _relaunched_clients(pid, port):
+    """Живые 1cv8* — дети pid с тем же -TPort: 1С перезапустила клиент версией кластера и вышла."""
+    import psutil
+    marker = '-TPort%s' % port
+    found = []
+    for child in psutil.process_iter(['ppid', 'name', 'exe', 'cmdline']):
+        info = child.info
+        if (info['ppid'] == pid and (info['name'] or '').lower().startswith('1cv8')
+                and marker in (info['cmdline'] or [])):
+            found.append(child)
+    return found
+
+
 def _finish_client_launch(result):
     # При неудачном запуске останавливаем созданный нами клиент в любом режиме рабочего стола.
     if not result['ok'] and _state.get('launched_pid'):
+        proc = _state.get('launched_process')
+        port = _state.get('launched_port')
+        # Наш процесс к этому моменту может ещё выходить: taskkill /T по нему тогда не доходит до дочернего.
+        relaunched = _relaunched_clients(proc.pid, port) if proc is not None else []
+        if relaunched:
+            # spike:spk_e348d75193@v1: дочерний клиент версии кластера держит порт, наш процесс вышел.
+            cluster = _exe_version(relaunched[0].info['exe'] or '')
+            result.update(code='client_version_mismatch', error=(
+                '1C restarted the client with the cluster version %s: profile version %s does not match the '
+                'cluster of the infobase. Set the profile version to %s.'
+                % (cluster or '?', _state.get('launched_version') or '?', cluster or 'the cluster version')))
         cleanup = tc_stop_client(graceful_timeout=0)
-        result['client_stopped'] = cleanup['ok']
+        stopped = cleanup['ok']
+        import psutil
+        for child in relaunched:
+            try:
+                child.kill()
+                child.wait(timeout=10)
+            except psutil.NoSuchProcess:
+                pass
+            except (psutil.Error, psutil.TimeoutExpired) as exc:
+                stopped = False
+                result['cleanup_error'] = 'Could not stop the relaunched client %s: %s' % (child.pid, exc)
+        result['client_stopped'] = stopped
         if not cleanup['ok']:
             result['cleanup_error'] = cleanup['error']
     return result
@@ -1587,6 +1626,7 @@ def tc_stop_client(graceful_timeout: float = 15) -> dict:
     _state.pop('launched_process', None)
     _state.pop('launched_port', None)
     _state.pop('_code_launch_path', None)
+    _state.pop('launched_version', None)
     registry = _profiles.registry_file()
     if registry is not None and _state.get('profile'):
         _client_registry.forget(registry, _state['profile'], port)
