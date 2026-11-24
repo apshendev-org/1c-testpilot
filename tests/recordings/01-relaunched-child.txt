@@ -1,0 +1,1 @@
+14:38:32 parent=85392 "C:\Program Files\1cv8\8.3.27.2342\bin\1cv8.exe" ENTERPRISE /IBConnectionString "Srvr=""<сервер>"";Ref=""<база дерева>""" /TESTCLIENT -TPort30001 /DisableStartupMessages /N*** /DisplayAllFunctions /Lru /iTaxi /CrunMcp=C:/dev/workspaces/1c_amu/thr_ppnzn92rz6-1/.ib/runmcp/ib.json /Execute ...\testpilot_assets\Testpilot.epf /AppAutoCheckVersion

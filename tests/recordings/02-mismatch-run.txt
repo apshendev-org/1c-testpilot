@@ -1,0 +1,16 @@
+Терминал BB term_nc56ayt6s8
+--- start 8.3.27.1688
+{"pid": 82776, "code": "client_version_mismatch", "error": "1C restarted the client with the cluster version 8.3.27.2342: profile version 8.3.27.1688 does not match the cluster of the infobase. 
+Set the profile version to 8.3.27.2342.", "client_stopped": true, "ok": false}
+ 
+exit=1
+--- processes after mismatch
+--- end left
+--- start 8.3.27.2342
+{"ok": true, "profile": "ib", "pid": 85792, "host": "127.0.0.1", "port": 30000, "version": "8.3.27.2342", "execution_ready": true, "reused": false}
+exit=0
+--- stop 8.3.27.2342
+{"ok": true, "pid": 85792, "stopped": true, "profile": "ib"}
+exit=0
+--- processes after stop
+--- end left
