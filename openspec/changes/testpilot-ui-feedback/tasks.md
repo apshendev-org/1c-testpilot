@@ -10,12 +10,18 @@
 
 | Требование | Сценарий | Тест |
 |---|---|---|
-| Ожидание и повтор до таймаута | Медленная запись; Окно ошибки; Значения полей не читаются; Эффект не виден | |
-| Исключение без видимого эффекта | Кнопка без эффекта; Сворачиваемая группа | |
-| Окно запущенного клиента развёрнуто | Сохранённый размер шире экрана (запись спайка); Не Windows | |
-| Класс по имени типа платформы | Имя типа платформы; Неизвестный класс | |
+| Ожидание и повтор до таймаута | Медленная запись | `test_effects.py::test_slow_save_is_waited_without_second_click` |
+| Ожидание и повтор до таймаута | Окно ошибки | `test_effects.py::test_error_window_fails_at_once` |
+| Ожидание и повтор до таймаута | Значения полей не читаются | `test_effects.py::test_unreadable_form_state_is_pressed_once` |
+| Ожидание и повтор до таймаута | Эффект не виден | `test_effects.py::test_unchanged_state_is_pressed_once_then_fails` |
+| Исключение без видимого эффекта | Кнопка без эффекта | `test_effects.py::test_expect_none_skips_observation` |
+| Исключение без видимого эффекта | Сворачиваемая группа | `test_effects.py::test_group_click_does_not_wait_for_effect` |
+| Окно запущенного клиента развёрнуто | Сохранённый размер шире экрана (запись спайка) | `test_ui_feedback.py::test_windows_client_is_launched_maximized`, `::test_isolated_desktop_launch_is_unchanged` |
+| Окно запущенного клиента развёрнуто | Не Windows | `test_ui_feedback.py::test_client_without_startupinfo_is_launched_without_the_window_flag` |
+| Класс по имени типа платформы | Имя типа платформы | `test_ui_feedback.py::test_platform_type_name_in_cls_finds_the_recorded_class` |
+| Класс по имени типа платформы | Неизвестный класс | `test_ui_feedback.py::test_unknown_class_is_empty_with_the_spelling_diagnostic`, `::test_diagnostics_of_a_missing_alias_name_the_reduced_class` (красный: диагностика пустого поиска получает имя типа, а не сведённый класс — решение 4) |
 
-- [ ] 2.1 Тесты по матрице, запись `docs/spikes/testpilot-maximized-window/recording/recording.txt` — со ссылкой из теста
+- [x] 2.1 Тесты по матрице, запись `docs/spikes/testpilot-maximized-window/recording/recording.txt` — со ссылкой из теста
 
 ## 3. Проверка
 

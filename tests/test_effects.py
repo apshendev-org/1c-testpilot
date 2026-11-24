@@ -99,10 +99,10 @@ class World:
         return S, SimpleNamespace(send_cmd=send_cmd)
 
 
-def click(world, name, effect=None, **kw):
+def click(world, name, effect=None, kind='Button', **kw):
     S, c = world.runtime()
     kw.setdefault('interval', 0.02)
-    return _effects.run(S, c, f'{FORM}.Button[{name}]', world.send(effect), **kw)
+    return _effects.run(S, c, f'{FORM}.{kind}[{name}]', world.send(effect), **kw)
 
 
 @pytest.fixture(autouse=True)
@@ -192,29 +192,41 @@ def test_arbitrary_command_reports_changed_field():
     assert result['ok'] and result['effect'] == 'changed' and result['changes']['fields'] == {'Сумма': 100}
 
 
-def test_slow_save_is_not_repeated():
+def test_slow_save_is_waited_without_second_click():
+    # «Медленная запись» (testpilot-ui-feedback): запись заканчивается после половины срока — прежний
+    # повтор на половине срока нажал бы «Записать» второй раз; теперь ждёт до timeout, нажата один раз.
     world = World()
-    result = click(world, 'ФормаЗаписать', lambda w: w.later(0.4, modified=False, ref='r'), timeout=2)
-    assert result['ok'] and world.clicks == 1 and 'repeated' not in result
+    result = click(world, 'ФормаЗаписать', lambda w: w.later(0.6, modified=False, ref='r'), timeout=1)
+    assert result['ok'] and result['effect'] == 'saved' and world.clicks == 1 and 'repeated' not in result
 
 
-def test_unchanged_state_is_repeated_once_then_fails():
+def test_unchanged_state_is_pressed_once_then_fails():
+    # «Эффект не виден» (testpilot-ui-feedback): форма читается, эффекта нет до timeout — ждать до срока
+    # и не повторять. Запись — до правки: goto-row-refresh (spike:spk_b232b1dd6d@v3), click ФормаОбновить
+    # в реестре дал effect_not_observed с повтором.
+    recorded_reply = recorded.exchange(recorded.REFRESH)[14]
+    assert recorded_reply['action'] == 'click' and recorded_reply['response']['repeated'] is True
     world = World()
+    started = time.monotonic()
     result = click(world, 'Заполнить', timeout=0.4)
-    assert world.clicks == 2 and result['code'] == 'effect_not_observed' and result['repeated'] is True
+    assert time.monotonic() - started >= 0.4 and world.clicks == 1
+    assert result['code'] == recorded_reply['response']['code'] == 'effect_not_observed'
+    assert 'repeated' not in result and result['expected'] == 'changed'
 
 
-def test_unreadable_form_state_is_not_repeated():
-    """D (docs/spikes/testpilot-cell-edit/recording/02-no-work-window.jsonl, шаг D_click_clean): форму
-    внешней обработки обработка Testpilot не читает, изменение поля «Замеры» движок не видит — повтор
-    нажатия выполнил бы команду второй раз (в записи «Итог данных» дал +2 строки, repeated: true)."""
+def test_unreadable_form_state_is_pressed_once():
+    """«Значения полей не читаются» (testpilot-ui-feedback): шаг D записи
+    docs/spikes/testpilot-cell-edit/recording/02-no-work-window.jsonl (D_click_clean) — форму внешней
+    обработки обработка Testpilot не читает, изменение поля «Замеры» движок не видит до timeout:
+    effect_not_observed, нажата один раз, без repeated (в записи «Итог данных» дал +2 строки — повтор
+    выполнил команду второй раз)."""
     recorded_reply = recorded.direct(recorded.NO_WORK_WINDOW, 'D_click_clean', 'click')
     assert len(recorded_reply) == 1 and recorded_reply[0]['response']['repeated'] is True   # запись — до правки
     world = World(helper=False)
     result = click(world, 'ФормаИтогДанных', lambda w: w.later(0, values={'Сумма': 100}), timeout=0.4)
     assert world.clicks == 1
     assert result['code'] == recorded_reply[0]['response']['code'] == 'effect_not_observed'
-    assert result['repeated'] is False
+    assert 'repeated' not in result
 
 
 def test_error_window_fails_at_once():
@@ -252,3 +264,13 @@ def test_expect_none_skips_observation():
     started = time.monotonic()
     result = click(world, 'Обновить', expect='none', timeout=5)
     assert result == {'ok': True, 'target': 'button'} and time.monotonic() - started < 0.2
+
+
+def test_group_click_does_not_wait_for_effect():
+    # «Сворачиваемая группа» (testpilot-ui-feedback): клик по Group без expect — как expect="none": ответ
+    # сразу после принятия команды, нажата один раз (записи нет — случай из живого потока thr_tipdp79usa).
+    world = World()
+    started = time.monotonic()
+    result = click(world, 'ФормаСвернуть', kind='Group', timeout=5)
+    assert result == {'ok': True, 'target': 'button'} and world.clicks == 1
+    assert time.monotonic() - started < 0.2
