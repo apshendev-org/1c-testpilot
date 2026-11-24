@@ -440,18 +440,27 @@ def _focus_service(R, client, service):
     active = R._window(client).get('key')
     if not active or active == root:
         return None
+    # Форма окна с handle: ACTIVATE по ключу окна без handle не вернул форму выбора из ячейки,
+    # служебная форма осталась активной (spike:spk_d8a5084a0c@v2, helper-2..4).
+    reply = client.send_cmd(G.GET_CHILD_OBJECTS, active, kind='read', middle=b'\xe1' + b'\x81' * 7)
+    forms = [o for o in (tc1c.decode_collection(reply['raw'], active) if reply.get('ok') and reply.get('raw') else [])
+             if o.get('class') == 'ManagedForm' and o.get('handle')]
     for kind in ('action', 'commit'):
         _checked(client.send_cmd(G.ACTIVATE, service['form']['key'], kind=kind, handle=service['form'].get('handle')))
-    return active
+    return dict(window=active, form=forms[0] if len(forms) == 1 else None)
 
 
-def _restore_window(client, key):
+def _restore_window(R, client, restore):
     """Return the work window; a refusal must not hide the execution result."""
-    try:
-        for kind in ('action', 'commit'):
-            _checked(client.send_cmd(G.ACTIVATE, key, kind=kind, middle=b''))
-    except (tc1c.OperationError, Failure):
-        pass
+    targets = [(restore['form']['key'], restore['form']['handle'])] if restore['form'] else []
+    for key, handle in targets + [(restore['window'], None)]:
+        try:
+            for kind in ('action', 'commit'):
+                _checked(client.send_cmd(G.ACTIVATE, key, kind=kind, middle=b'', handle=handle))
+            if R._window(client).get('key') == restore['window']:
+                return
+        except (tc1c.OperationError, Failure):
+            pass
 
 
 def execute(R, client, *, mode, context, code=None, query=None, parameters=None, limit=100, timeout=180,
@@ -605,7 +614,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
         # Кадр без ответа (срок истёк) ещё ждёт: новых команд не шлём, окно остаётся как есть.
         if restore and not vars(client).get('_pending'):
             with internal(client):
-                _restore_window(client, restore)
+                _restore_window(R, client, restore)
         client._track = old_track
         client._io_deadline = old_deadline
         client._max_action_time = old_max
