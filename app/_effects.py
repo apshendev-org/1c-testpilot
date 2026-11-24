@@ -292,7 +292,10 @@ def run(S, c, key, send, *, answer=None, expect=None, timeout=10.0, interval=0.2
         if now >= deadline:
             return dict(_failure(S, 'effect_not_observed', 'The expected effect was not observed before the timeout.',
                                  expected, after, repeated=repeated), target=key)
-        if not repeated and answered is None and now >= half and _same(before, after):
+        # Повтор — только когда значения полей формы читаются: иначе «ничего не изменилось» не доказывает
+        # потерю нажатия, а повтор выполнил бы команду второй раз (spike:spk_d8a5084a0c@v1, шаг D).
+        if (not repeated and answered is None and now >= half and observer.helper is True
+                and _same(before, after)):
             repeated = True
             result = send()
             if not result.get('ok'):

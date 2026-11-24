@@ -2234,7 +2234,8 @@ def tc_click(key: str, handle: str, answer: str = None, expect: str = None, time
     ok=true only with a confirmed effect: standard commands Записать/Провести/...ИЗакрыть/Закрыть/ОК/
     Выбрать/Создать by their meaning (effect saved/posted/closed/opened, ref), any other button by any
     observed change (effect=changed, changes). The click waits up to timeout seconds and repeats once if
-    nothing changed at all. 1C messages or an error window fail at once. A modal question fails with
+    nothing changed at all and form field values are readable; without them it does not repeat.
+    An unfinished spreadsheet cell edit refuses the click with other_input_pending. 1C messages or an error window fail at once. A modal question fails with
     unexpected_dialog (question, buttons) unless answer names its button caption; then it is pressed
     and the effect is still checked. effect_not_observed has expected, window, messages and snapshot
     (form context file). expect="none" only for buttons without any observable effect.
@@ -2253,6 +2254,9 @@ def tc_click(key: str, handle: str, answer: str = None, expect: str = None, time
     if type(timeout) not in (int, float) or not 0 <= timeout <= 600:
         return dict(ok=False, code='invalid_argument', error='timeout must be from 0 to 600 seconds.')
     c = _need()
+    error = _pending_area_error(c)
+    if error:
+        return error
     guid = _click_guid(key)
     if guid is None:
         return {'ok': False, 'target': key, 'code': 'unsupported_element_type',
@@ -3135,7 +3139,8 @@ def _table_activate(c, key, handle, window):
                                            {'code': 'other_input_pending'})
                 c._pending_text_input = None
         elif kind == 'SpreadsheetDocumentField':
-            if _cell_flag(c, G.CURRENT_MODE_IS_EDIT_FIELD, current, obj['handle']) is not False:
+            if (current in getattr(c, '_pending_area_edits', ())
+                    or _cell_flag(c, G.CURRENT_MODE_IS_EDIT_FIELD, current, obj['handle']) is not False):
                 raise _CellEditFailure('Finish or cancel document editing first.', {'code': 'other_input_pending'})
         elif kind in ('TextDocumentField', 'FormattedDocumentField', 'HTMLDocumentField'):
             raise _CellEditFailure('Activate the table explicitly after finishing document input.',
@@ -3777,6 +3782,8 @@ def tc_execute_choice_from_menu(key: str, index: int | str, handle: str) -> dict
     ok = True
     for kind in ('action', 'commit'):
         ok = c.send_cmd(G.EXECUTE_CHOICE_FROM_MENU, key, kind=kind, middle=tc1c.mk_choice(index), handle=handle)['ok'] and ok
+    if ok:
+        _clear_pending_area_edit(c, key)   # меню расшифровки вместо правки ячейки
     _state['window_key'] = None          # модальный выбор закрылся — активное окно другое
     return {'ok': ok, 'target': key, 'index': index}
 
@@ -3932,7 +3939,8 @@ def _area_edit_started(c, key, handle, before, ok):
                 pass
         result['edit_mode'] = mode
         pending = getattr(c, '_pending_area_edits', set())
-        if mode is not False and changed is not True:
+        # Флаг правки ложно отвечает false при открытом редакторе ссылочной ячейки (spike:spk_d8a5084a0c@v1).
+        if changed is not True:
             pending.add(key)
         else:
             pending.discard(key)
@@ -3941,8 +3949,11 @@ def _area_edit_started(c, key, handle, before, ok):
             result.update(suggested_action='get_active_window',
                           message='The action changed the active window. Inspect it to continue.')
         elif mode is False:
-            result.update(suggested_action='execute_choice_from_menu',
-                          message='Cell editing did not start. If this area opens a drill-down menu, use execute_choice_from_menu on this field.')
+            result.update(suggested_action='end_edit_current_area',
+                          message='Cell editing is not confirmed, but an editor may still be open and take clicks. '
+                                  'Continue with input_text and end_edit_current_area, or cancel it with '
+                                  'end_edit_current_area(cancel=true). If this area opens a drill-down menu, '
+                                  'use execute_choice_from_menu on this field.')
     return result
 
 
@@ -3953,6 +3964,18 @@ def _area_action_window(c):
         return _window(c).get('key')
     except Exception:
         return None
+
+def _pending_area_error(c):
+    """Refusal while a cell edit of a still-open document field is unfinished."""
+    for key in tuple(getattr(c, '_pending_area_edits', ())):
+        if _ref_live_object(c, key) is None:
+            _clear_pending_area_edit(c, key)   # форма закрыта — правки нет
+            continue
+        return {'ok': False, 'code': 'other_input_pending', 'target': key,
+                'error': 'A spreadsheet cell edit is unfinished; it would take this action.',
+                'suggested_action': 'end_edit_current_area'}
+    return None
+
 
 def _clear_pending_area_edit(c, key):
     getattr(c, '_pending_area_edits', set()).discard(key)
@@ -4220,11 +4243,27 @@ def tc_select_value(key: str, handle: str, value: str = None, match: _value_sele
     max_rows=1..10000; timeout is in seconds, 0<timeout<=3600, and covers the action.
     A list step refused with unsupported_receiver is re-read and repeated until timeout; attempts counts tries.
     Failure leaves the UI and does not undo sent choices. Table cells use the current row and
-    leave row editing open."""
+    leave row editing open. A spreadsheet-document field takes value only: it is typed into the current
+    cell as set_area_text (a reference cell needs the exact presentation of an existing item)."""
     c = _need()
+    if _key_class(key) == 'EditField' and _kind_of(c, key) == 'SpreadsheetDocumentField':
+        return _select_cell_value(c, key, handle, value, match, choice_table, choice_column, data_type, expected)
     return _value_selection.run(sys.modules[__name__], c, key, handle, value=value, match=match,
         choice_table=choice_table, choice_column=choice_column, data_type=data_type,
         expected=expected, max_rows=max_rows, timeout=timeout)
+
+
+def _select_cell_value(c, key, handle, value, *other):
+    # Форма выбора по ячейке не открывается (start_choosing — choice_not_opened), ссылка ставится вводом
+    # точного представления (spike:spk_d8a5084a0c@v1, шаги C4, C6, C7).
+    if not isinstance(value, str) or not value or any(v is not None for v in other):
+        return {'ok': False, 'target': key, 'code': 'invalid_argument',
+                'error': 'A spreadsheet-document field takes only value: the exact presentation for the current cell.'}
+    current = tc_get_current_area_address(key, handle)
+    if not current.get('ok') or not current.get('address'):
+        return dict(current, ok=False, code=current.get('code') or 'cell_unavailable',
+                    error=current.get('error') or 'The current cell address is unavailable; call set_current_area.')
+    return tc_set_area_text(key, current['address'].split(':')[0], value, handle)
 
 
 @_action('tc_field')
@@ -7057,7 +7096,13 @@ def tc_set_area_text(key: str, address: str, text: str, handle: str) -> dict:
         stage = 'verify'
         _cell_ready(c, key, handle)
         _, after = _observe_area(c, key, handle, {'area': actual})
-        return _cell_result(key, before, after, text, 'done')
+        result = _cell_result(key, before, after, text, 'done')
+        if result['ok'] or result.get('verified') is None:
+            return result
+        # Ссылочная ячейка не приняла текст: редактор остаётся открытым и забирает нажатия.
+        result['message'] = ('A reference cell accepts only the exact presentation of an existing item; '
+                             'the edit was cancelled.')
+        editing = True
     except _CellEditFailure as exc:
         result = _cell_result(key, before, after, text, stage, str(exc))
     except Exception as exc:
@@ -7068,6 +7113,8 @@ def tc_set_area_text(key: str, address: str, text: str, handle: str) -> dict:
             result['edit_cancelled'] = tc_end_edit_current_area(key, handle, cancel=True).get('ok', False)
         except Exception:
             result['edit_cancelled'] = False
+        if not result['edit_cancelled']:
+            c._pending_area_edits = getattr(c, '_pending_area_edits', set()) | {key}   # отмена не прошла — click откажет
     return result
 
 
