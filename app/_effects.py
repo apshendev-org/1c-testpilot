@@ -152,11 +152,6 @@ class Observer:
         return state
 
 
-def _same(before, after):
-    keys = ('window', 'title', 'url', 'found', 'modified', 'object', 'values', 'messages', 'current')
-    return all(before.get(k) == after.get(k) for k in keys) and after.get('dialog') is None
-
-
 def _new_messages(before, after):
     old, new = before.get('messages') or [], after.get('messages') or []
     return new[len(old):] if new[:len(old)] == old else (new if new != old else [])
@@ -239,7 +234,8 @@ def _failure(S, code, error, expected, after, messages=None, **extra):
 
 def run(S, c, key, send, *, answer=None, expect=None, timeout=10.0, interval=0.2):
     """Click with effect confirmation. send() performs the click and returns its raw result."""
-    if expect == 'none':
+    # Группа: у переключения нет наблюдаемого состояния — ждать нечего.
+    if expect == 'none' or S._key_class(key) == 'Group':
         return send()
     expected = expected_effect(key)
     observer = Observer(S, c, key)
@@ -252,8 +248,8 @@ def run(S, c, key, send, *, answer=None, expect=None, timeout=10.0, interval=0.2
     if not result.get('ok'):
         return result
     started = time.monotonic()
-    deadline, half = started + timeout, started + timeout / 2
-    repeated, answered = False, None
+    deadline = started + timeout
+    answered = None
     while True:
         after = observer.capture()
         dialog = after['dialog']
@@ -282,8 +278,6 @@ def run(S, c, key, send, *, answer=None, expect=None, timeout=10.0, interval=0.2
             new = _new_messages(before, after)
             if new:
                 out['messages'] = new
-            if repeated:
-                out['repeated'] = True
             return out
         if expected != 'changed' and _new_messages(before, after):
             return dict(_failure(S, 'effect_not_observed', 'The command reported messages instead of its effect.',
@@ -291,13 +285,5 @@ def run(S, c, key, send, *, answer=None, expect=None, timeout=10.0, interval=0.2
         now = time.monotonic()
         if now >= deadline:
             return dict(_failure(S, 'effect_not_observed', 'The expected effect was not observed before the timeout.',
-                                 expected, after, repeated=repeated), target=key)
-        # Повтор — только когда значения полей формы читаются: иначе «ничего не изменилось» не доказывает
-        # потерю нажатия, а повтор выполнил бы команду второй раз (spike:spk_d8a5084a0c@v1, шаг D).
-        if (not repeated and answered is None and now >= half and observer.helper is True
-                and _same(before, after)):
-            repeated = True
-            result = send()
-            if not result.get('ok'):
-                return result
+                                 expected, after), target=key)
         time.sleep(min(interval, max(0.0, deadline - now)))

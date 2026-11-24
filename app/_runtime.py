@@ -5718,12 +5718,19 @@ def _find(c, name=None, cls=None, type=None, root_key=None, title=None, seen_cla
         res.append(row)
     return res
 
+# Агент берёт имя класса из типа платформы: FormGroup, ГруппаФормы — это Group.
+_CLASS_ALIASES = {alias: cls for cls, aliases in {
+    'Group': ('FormGroup', 'ГруппаФормы'), 'Button': ('FormButton', 'КнопкаФормы'),
+    'EditField': ('FormField', 'ПолеФормы'), 'Table': ('FormTable', 'ТаблицаФормы'),
+    'Decoration': ('FormDecoration', 'ДекорацияФормы')}.items() for alias in aliases}
+
 def _find_wait(c, name=None, cls=None, type=None, root_key=None, title=None, timeout=0,
                seen_classes=None, seen_types=None):
     """_find с повтором до timeout секунд (0 — один проход): объект может появиться не сразу.
     seen_classes (если передан set) накапливает классы, встреченные ЗА ВРЕМЯ ожидания, — чтобы
     диагностика опиралась на его наблюдения, а не на отдельный обход после таймаута."""
     import time as _t
+    cls = _CLASS_ALIASES.get(cls, cls)
     deadline = _t.time() + max(timeout or 0, 0)
     while True:
         res = _find(c, name, cls, type, root_key, title, seen_classes=seen_classes,
