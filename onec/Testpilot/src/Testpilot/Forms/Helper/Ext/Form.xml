@@ -19,11 +19,6 @@
 			<ContextMenu name="ServiceInfoMenu" id="141"/>
 			<ExtendedTooltip name="ServiceInfoTip" id="142"/>
 		</InputField>
-		<FormattedDocumentField name="ClientRequest" id="10">
-			<DataPath>ClientDocument</DataPath>
-			<ContextMenu name="ClientMenu" id="11"/>
-			<ExtendedTooltip name="ClientTip" id="12"/>
-		</FormattedDocumentField>
 		<InputField name="ClientResult" id="20">
 			<DataPath>ClientResult</DataPath>
 			<ReadOnly>true</ReadOnly>
@@ -31,16 +26,6 @@
 			<ContextMenu name="ClientResultMenu" id="21"/>
 			<ExtendedTooltip name="ClientResultTip" id="22"/>
 		</InputField>
-		<Button name="RunClient" id="30">
-			<Type>UsualButton</Type>
-			<CommandName>Form.Command.RunClient</CommandName>
-			<ExtendedTooltip name="ClientRunTip" id="31"/>
-		</Button>
-		<FormattedDocumentField name="ServerRequest" id="110">
-			<DataPath>ServerDocument</DataPath>
-			<ContextMenu name="ServerMenu" id="111"/>
-			<ExtendedTooltip name="ServerTip" id="112"/>
-		</FormattedDocumentField>
 		<InputField name="ServerResult" id="120">
 			<DataPath>ServerResult</DataPath>
 			<ReadOnly>true</ReadOnly>
@@ -48,10 +33,10 @@
 			<ContextMenu name="ServerResultMenu" id="121"/>
 			<ExtendedTooltip name="ServerResultTip" id="122"/>
 		</InputField>
-		<Button name="RunServer" id="130">
+		<Button name="OpenRequest" id="150">
 			<Type>UsualButton</Type>
-			<CommandName>Form.Command.RunServer</CommandName>
-			<ExtendedTooltip name="ServerRunTip" id="131"/>
+			<CommandName>Form.Command.OpenRequest</CommandName>
+			<ExtendedTooltip name="OpenRequestTip" id="151"/>
 		</Button>
 	</ChildItems>
 	<Attributes>
@@ -73,11 +58,6 @@
 				</v8:StringQualifiers>
 			</Type>
 		</Attribute>
-		<Attribute name="ClientDocument" id="2">
-			<Type>
-				<v8:Type xmlns:d="http://v8.1c.ru/8.2/data/formatted-document">d:FormattedDocument</v8:Type>
-			</Type>
-		</Attribute>
 		<Attribute name="ServerResult" id="11">
 			<Type>
 				<v8:Type>xs:string</v8:Type>
@@ -87,18 +67,10 @@
 				</v8:StringQualifiers>
 			</Type>
 		</Attribute>
-		<Attribute name="ServerDocument" id="12">
-			<Type>
-				<v8:Type xmlns:d="http://v8.1c.ru/8.2/data/formatted-document">d:FormattedDocument</v8:Type>
-			</Type>
-		</Attribute>
 	</Attributes>
 	<Commands>
-		<Command name="RunClient" id="1">
-			<Action>ВыполнитьНаКлиенте</Action>
-		</Command>
-		<Command name="RunServer" id="2">
-			<Action>ВыполнитьНаСервере</Action>
+		<Command name="OpenRequest" id="3">
+			<Action>ОткрытьЗапрос</Action>
 		</Command>
 	</Commands>
 </Form>

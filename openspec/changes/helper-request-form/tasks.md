@@ -3,20 +3,21 @@
 - [x] 1.1 Возврат окна после кода Helper: ACTIVATE и Активизировать() не работают, форма с блокировкой окна владельца возвращает активность, протокольный путь без активизации Helper (spike:spk_cff9b4db89@v2, записи 01–05)
 - [x] 1.2 Ответ из поля неактивного Helper читается протоколом, активное окно не меняется (запись 06, restore-5)
 - [x] 1.3 Модальный вопрос и окно ошибки: CLICK по кнопке Helper отклонён, как и прежний execute_code; после ответа — рабочая форма (запись 07, restore-6)
+- [x] 1.4 Код в `Request` открывает форму: после закрытия `Request` активна она, а не владелец (запись 08, restore-7, spike:spk_cff9b4db89@v3)
 
 ## 2. Обработка (onec/Testpilot/src)
 
-- [ ] 2.1 Форма `Request`: поле `Request`, кнопки `RunClient`/`RunServer`, переменная `Сервис`, «Выполнить» → `Сервис.ВыполнитьЗапрос`, затем закрытие; `ПередЗакрытием` не отказывает
-- [ ] 2.2 Helper: команда и кнопка `OpenRequest` (владелец — форма активного окна, иначе Helper; блокировка окна владельца); экспортная `ВыполнитьЗапрос(Текст, Контекст)` из тел `ВыполнитьНаКлиенте`/`ВыполнитьНаСервере`; ответ — в `ClientResult`/`ServerResult`
-- [ ] 2.3 Helper: убрать поля `ClientRequest`, `ServerRequest`, кнопки и команды `RunClient`, `RunServer`
+- [x] 2.1 Форма `Request`: поле `Request`, кнопки `RunClient`/`RunServer`, переменная `Сервис`, «Выполнить» → `Сервис.ВыполнитьЗапросСервиса`, затем закрытие; `ПередЗакрытием` не отказывает
+- [x] 2.2 Helper: команда и кнопка `OpenRequest` (владелец — форма активного окна, иначе Helper; блокировка окна владельца); экспортная `ВыполнитьЗапросСервиса(Текст, Контекст)` из тел `ВыполнитьНаКлиенте`/`ВыполнитьНаСервере`; ответ — в `ClientResult`/`ServerResult`
+- [x] 2.3 Helper: убрать поля `ClientRequest`, `ServerRequest`, кнопки и команды `RunClient`, `RunServer`
 - [ ] 2.4 Пересобрать `app/testpilot_assets/Testpilot.epf` (WS, `dev_ib.py epf-build`)
 
 ## 3. testpilot (app/_code_execution.py)
 
-- [ ] 3.1 `FORM_NAMES` — имена формы `Request`; `discover` — Helper по имени, структура `ClientResult`, `ServerResult`, `OpenRequest`, `ServiceInfo`, иначе `helper_version_mismatch`
-- [ ] 3.2 `execute`: CLICK `OpenRequest` без ACTIVATE → окно `Request` до срока → ввод → CLICK `Run*` → ответ из поля Helper; удалить `_focus_service`, `_restore_window`
-- [ ] 3.3 Незакрытая `Request`: `_service_pending` с ключом кнопки `Request`; разрешение прежнего запроса или закрытие формы перед новым
-- [ ] 3.4 Отказ CLICK `OpenRequest` при модальном окне → `modal_window_open` с подсказкой, `_service_pending` снят
+- [x] 3.1 `FORM_NAMES` — имена формы `Request`; `discover` — Helper по имени, структура `ClientResult`, `ServerResult`, `OpenRequest`, `ServiceInfo`, иначе `helper_version_mismatch`
+- [x] 3.2 `execute`: CLICK `OpenRequest` без ACTIVATE → окно `Request` до срока → ввод → CLICK `Run*` → ответ из поля Helper; удалить `_focus_service`, `_restore_window`
+- [x] 3.3 Незакрытая `Request`: `_service_pending` с ключом кнопки `Request`; разрешение прежнего запроса или закрытие формы перед новым
+- [x] 3.4 Отказ CLICK `OpenRequest` при модальном окне → `modal_window_open` с подсказкой, `_service_pending` снят
 
 ## 4. Тесты (поток тестов, по записям спайка)
 

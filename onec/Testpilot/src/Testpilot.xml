@@ -16,6 +16,7 @@
 		</Properties>
 		<ChildObjects>
 			<Form>Helper</Form>
+			<Form>Request</Form>
 		</ChildObjects>
 	</ExternalDataProcessor>
 </MetaDataObject>

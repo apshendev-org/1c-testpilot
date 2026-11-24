@@ -14,7 +14,10 @@ import guids as G
 import tc1c
 
 FORM_NAME = 'ВнешняяОбработка.Testpilot.Форма.Helper'
-FORM_NAMES = frozenset({FORM_NAME, 'ExternalDataProcessor.Testpilot.Form.Helper'})
+HELPER_FORM_NAMES = frozenset({FORM_NAME, 'ExternalDataProcessor.Testpilot.Form.Helper'})
+# Форма одного запроса: Helper открывает её над активной формой, она закрывается после ответа.
+REQUEST_FORM_NAMES = frozenset({'ВнешняяОбработка.Testpilot.Форма.Request', 'ExternalDataProcessor.Testpilot.Form.Request'})
+FORM_NAMES = HELPER_FORM_NAMES | REQUEST_FORM_NAMES
 PROTOCOL = 1
 _internal = ContextVar('testpilot_service_access', default=None)
 
@@ -295,14 +298,14 @@ def discover(R, client, *, startup=False):
                 if form.get('form_name') == 'MessageBox':
                     # Read the startup question before trying fields behind its modal window.
                     return None, objects
-        forms = [o for o in objects if o.get('form_name') in FORM_NAMES]
+        forms = [o for o in objects if o.get('form_name') in HELPER_FORM_NAMES]
         if not forms:
             return None, objects
         if len(forms) != 1:
             raise Failure('helper_ambiguous', 'More than one Testpilot service form is open.')
         form = forms[0]
         fields = {o.get('name'): o for o in objects if o.get('key', '').startswith(form['key'] + '.')}
-        names = ('ClientRequest', 'ClientResult', 'RunClient', 'ServerRequest', 'ServerResult', 'RunServer')
+        names = ('ClientResult', 'ServerResult', 'OpenRequest')
         if any(name not in fields for name in names):
             raise Failure('helper_version_mismatch', 'The Testpilot service form has an incompatible structure.')
         for name in ('ClientResult', 'ServerResult'):
@@ -432,26 +435,52 @@ def _remember_action_reply(pending, key, raw):
     pending['action_reply'] = reply
 
 
-def _focus_service(R, client, service):
-    """Activate the service form when another window is active; that window is returned for restore.
-
-    A field of an inactive window refuses input, so a work form left active by the test blocks execution."""
-    root = service['form']['key'].split('.ManagedForm[', 1)[0]
-    active = R._window(client).get('key')
-    if not active or active == root:
+def _request_form(R, client, window):
+    """Fields of the Request form in window, or None for any other window."""
+    if not window:
         return None
-    for kind in ('action', 'commit'):
-        _checked(client.send_cmd(G.ACTIVATE, service['form']['key'], kind=kind, handle=service['form'].get('handle')))
-    return active
+    objects = R._search_objects(client, window)
+    filter_objects(client, objects)
+    form = next((o for o in objects if o.get('form_name') in REQUEST_FORM_NAMES), None)
+    if form is None:
+        return None
+    return {o.get('name'): o for o in objects if o.get('key', '').startswith(form['key'] + '.')}
 
 
-def _restore_window(client, key):
-    """Return the work window; a refusal must not hide the execution result."""
+def _open_request(R, client, service):
+    """Open a Request form over the active form without activating Helper; return its window and fields.
+
+    Activating Helper would make the platform return focus to it when the work form closes,
+    and ACTIVATE cannot restore a choice form opened from a spreadsheet cell (kit spike
+    testpilot-helper-restore). Closing Request, opened with LockOwnerWindow, returns focus to its owner."""
+    opened = vars(client).setdefault('_request_windows', set())
+    active = R._window(client).get('key')
+    helper_root = service['form']['key'].split('.ManagedForm[', 1)[0]
+    if active in opened or (active != helper_root and protected(client, active)):
+        # An interrupted call left its Request open; it blocks the owner window until closed.
+        _checked(R.tc_close_window(key=active))
+        opened.discard(active)
+        active = R._window(client).get('key')
+    button = service['fields']['OpenRequest']
     try:
         for kind in ('action', 'commit'):
-            _checked(client.send_cmd(G.ACTIVATE, key, kind=kind, middle=b''))
-    except (tc1c.OperationError, Failure):
-        pass
+            _checked(client.send_cmd(G.CLICK, button['key'], kind=kind, handle=button['handle']))
+    except tc1c.OperationError:
+        raise Failure('modal_window_open', 'A modal window (question, error) blocks the 1C interface; nothing was executed.',
+                      suggested_action='answer_dialog',
+                      message='Answer it with answer_dialog, or read it with get_current_error and close it with close_window, then retry.') from None
+    while True:
+        window = R._window(client).get('key')
+        # Only a newly active window is read: reading every element of the work form is costly.
+        fields = _request_form(R, client, window) if window and window != active else None
+        if fields is not None:
+            opened.add(window)
+            if any(name not in fields for name in ('Request', 'RunClient', 'RunServer')):
+                raise Failure('helper_version_mismatch', 'The Testpilot request form has an incompatible structure.')
+            return window, fields
+        if time.monotonic() >= client._io_deadline:
+            raise TimeoutError('The Testpilot request form did not open.')
+        time.sleep(0.05)
 
 
 def execute(R, client, *, mode, context, code=None, query=None, parameters=None, limit=100, timeout=180,
@@ -497,7 +526,6 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
     client.RESYNC_TIMEOUT = timeout
     client._max_action_time = 0  # The total execution deadline governs every protocol read.
     client._io_deadline = time.monotonic() + timeout
-    restore = None
     try:
         with internal(client):
             service = vars(client).get('_testpilot_service')
@@ -527,7 +555,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
                         client._resync()
                     # Only retry a frame proven not to have reached the socket.
                     # Once sent, even a receive timeout must never repeat this commit.
-                    button = service['fields'][commit]
+                    button = previous['button']
                     previous.pop('commit_pending')
                     try:
                         _checked(client.send_cmd(G.CLICK, button['key'], kind='commit', handle=button['handle']))
@@ -557,12 +585,12 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
             prefix = 'Client' if context == 'client' else 'Server'
             fields = service['fields']
             client._track = None
-            restore = _focus_service(R, client, service)
-            _checked(R.tc_input_html(**_address(fields[prefix + 'Request']),
+            request_window, request_form = _open_request(R, client, service)
+            _checked(R.tc_input_html(**_address(request_form['Request']),
                                     html='<pre>' + html.escape(payload) + '</pre>'))
-            client._service_pending = dict(request_id=request_id, field=prefix + 'Result', mode=mode)
             # Avoid public click readback: the result field itself synchronizes with 1C.
-            button = fields['Run' + prefix]
+            button = request_form['Run' + prefix]
+            client._service_pending = dict(request_id=request_id, field=prefix + 'Result', mode=mode, button=button)
             for kind in ('action', 'commit'):
                 try:
                     _checked(client.send_cmd(G.CLICK, button['key'], kind=kind, handle=button['handle']))
@@ -586,6 +614,7 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
             response = _read(R, fields[prefix + 'Result'])
             if response.get('request_id') != request_id:
                 raise Failure('helper_protocol_error', 'The helper returned a result for a different request.', request_id=request_id)
+            client._request_windows.discard(request_window)  # Request closed itself after the answer.
             client._service_pending = None
             response.pop('protocol', None)
             if drained is not None:
@@ -602,10 +631,8 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
                           request_id=pending['request_id'], may_be_running=True) from None
         raise
     finally:
-        # Кадр без ответа (срок истёк) ещё ждёт: новых команд не шлём, окно остаётся как есть.
-        if restore and not vars(client).get('_pending'):
-            with internal(client):
-                _restore_window(client, restore)
+        # The cached active window is the closed Request; the next read must query 1C.
+        R._state['window_key'] = None
         client._track = old_track
         client._io_deadline = old_deadline
         client._max_action_time = old_max
