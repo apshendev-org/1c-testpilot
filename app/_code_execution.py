@@ -563,11 +563,13 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
                         previous['commit_pending'] = commit
                         raise
                 response = _read(R, service['fields'][previous['field']])
-                if response.get('request_id') != previous['request_id']:
+                if response.get('request_id') == previous['request_id']:
+                    # Прежний результат прочитан; новый запрос выполняется в том же вызове, а не теряется.
+                    drained = response
+                elif previous.get('window') not in vars(client).get('_request_windows', ()):
                     raise Failure('execution_pending', 'The previous execution has no matching result yet.', **previous)
+                # Без результата открытая форма запроса держит окно владельца: _open_request закроет её.
                 client._service_pending = None
-                # Прежний результат прочитан; новый запрос выполняется в том же вызове, а не теряется.
-                drained = response
             if mode in ('metadata', 'function', 'form_context', 'form_details', 'form_state'):
                 from _service_metadata import function_arguments
                 capability = {'metadata': 'metadata', 'function': 'custom_functions',
@@ -590,7 +592,8 @@ def execute(R, client, *, mode, context, code=None, query=None, parameters=None,
                                     html='<pre>' + html.escape(payload) + '</pre>'))
             # Avoid public click readback: the result field itself synchronizes with 1C.
             button = request_form['Run' + prefix]
-            client._service_pending = dict(request_id=request_id, field=prefix + 'Result', mode=mode, button=button)
+            client._service_pending = dict(request_id=request_id, field=prefix + 'Result', mode=mode, button=button,
+                                           window=request_window)
             for kind in ('action', 'commit'):
                 try:
                     _checked(client.send_cmd(G.CLICK, button['key'], kind=kind, handle=button['handle']))
