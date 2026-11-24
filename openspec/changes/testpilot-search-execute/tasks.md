@@ -22,19 +22,19 @@
 
 Матрица для потока тестов: требования `specs/mcp-tools/spec.md` и сценарий `specs/client-profiles/spec.md`.
 
-- [ ] 4.1 Список инструментов — только `search`, `execute`; описания и схемы вместе ≤ 8000 символов при включённых коде, запросах, скриншотах
-- [ ] 4.2 Один вызов `get_active_window` через `execute` даёт тот же ответ, что прежний вызов действия (по записи)
-- [ ] 4.3 Лишний аргумент, нет обязательного, неизвестное действие — отказ до отправки, в ответе сигнатура или ближайшие имена
-- [ ] 4.4 Пачка 21 — отказ, ни один шаг не исполнен
-- [ ] 4.5 Отказ во втором из трёх шагов — третий не исполнен, `ok: false`, `stopped_at: 1`
-- [ ] 4.6 `$0.object.ref` из `find_object` подставлен в `click`; отсутствующий путь — `unresolved_reference`, клик не отправлен; `$$x` передан как `$x`
-- [ ] 4.7 Пачка `[click, get_screenshot]` — текст двух шагов и одно изображение, отмеченное шагом 1
-- [ ] 4.8 `search`: пустой запрос — группы и имена; `click` — сигнатура и документация; слова — найдено `set_area_text`; выключенные скриншоты — нет `get_screenshot` ни в `search`, ни в схеме `execute`
-- [ ] 4.9 Пользовательские функции: появились у подключённой обработки — `tools/list_changed` и имя в схеме `execute`; скрытая — отказ прежним сообщением
-- [ ] 4.10 Пачка только из `list_connections` отвечает, пока рабочий вызов ждёт 1С
-- [ ] 4.11 В документации действий, описаниях `search`/`execute` и текстах подсказок нет `tc_[a-z_]+\(`
-- [ ] 4.12 Сценарий `client-profiles`: `connect` через `execute` без `version` повторяет рукопожатие с версией из отказа
-- [ ] 4.13 `suggested_call` у `get_cell_text` с `text: null` — `{action, args}`, повтор его через `execute` проходит без правки
+- [x] 4.1 Список инструментов — только `search`, `execute`; описания и схемы вместе ≤ 8000 символов при включённых коде, запросах, скриншотах — `test_search_execute.py::test_two_tools_fit_8000_characters_with_code_queries_and_screenshots`
+- [x] 4.2 Один вызов `get_active_window` через `execute` даёт тот же ответ, что прежний вызов действия (по записи) — `::test_single_call_answers_as_the_former_group_call`
+- [x] 4.3 Лишний аргумент, нет обязательного, неизвестное действие — отказ до отправки, в ответе сигнатура или ближайшие имена — `::test_wrong_arguments_are_refused_before_anything_is_sent`
+- [x] 4.4 Пачка 21 — отказ, ни один шаг не исполнен — `::test_batch_outside_1_to_20_is_refused_with_nothing_executed` (0 и 21)
+- [x] 4.5 Отказ во втором из трёх шагов — третий не исполнен, `ok: false`, `stopped_at: 1` — `::test_batch_stops_at_the_first_refusal`
+- [x] 4.6 `$0.object.ref` из `find_object` подставлен в `click`; отсутствующий путь — `unresolved_reference`, клик не отправлен; `$$x` передан как `$x` — `::test_reference_to_an_earlier_step_takes_the_found_button_and_dd_keeps_one_dollar`, `::test_unresolved_reference_stops_the_step_without_sending`
+- [x] 4.7 Пачка `[click, get_screenshot]` — текст двух шагов и одно изображение, отмеченное шагом 1 — `::test_screenshot_step_is_one_image_marked_with_its_step`
+- [x] 4.8 `search`: пустой запрос — группы и имена; `click` — сигнатура и документация; слова — найдено `set_area_text`; выключенные скриншоты — нет `get_screenshot` ни в `search`, ни в схеме `execute` — `::test_search_without_query_lists_groups_and_names_without_documentation`, `::test_search_by_action_name_gives_signature_and_documentation`, `::test_search_by_words_finds_actions_by_their_documentation`, `::test_disabled_screenshots_leave_the_catalog_and_the_execute_schema`
+- [x] 4.9 Пользовательские функции: появились у подключённой обработки — `tools/list_changed` и имя в схеме `execute`; скрытая — отказ прежним сообщением — `::test_custom_functions_appear_with_list_changed_and_hidden_ones_are_refused`
+- [x] 4.10 Пачка только из `list_connections` отвечает, пока рабочий вызов ждёт 1С — `::test_list_connections_answers_while_a_worker_waits_for_1c`
+- [x] 4.11 В документации действий, описаниях `search`/`execute` и текстах подсказок нет `tc_[a-z_]+\(` — `::test_action_documentation_and_tool_descriptions_name_actions_not_group_calls` (и каждый ответ модуля — `plain_text`)
+- [x] 4.12 Сценарий `client-profiles`: `connect` через `execute` без `version` повторяет рукопожатие с версией из отказа — `::test_connect_through_execute_without_version_takes_the_running_version`
+- [x] 4.13 `suggested_call` у `get_cell_text` с `text: null` — `{action, args}`, повтор его через `execute` проходит без правки — `::test_suggested_call_is_an_execute_step` (таблица «Список» записи 05-read-rows-focus; кадр чтения ячейки — заглушка)
 
 ## 5. Кит (вне `testpilot/`)
 

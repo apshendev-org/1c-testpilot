@@ -1,4 +1,4 @@
-"""MCP testpilot — два инструмента search и execute (изменение testpilot-search-execute, задачи 4.1–4.12 матрицы):
+"""MCP testpilot — два инструмента search и execute (изменение testpilot-search-execute, задачи 4.1–4.13 матрицы):
 требования «Два инструмента», «Каталог и документация действий», «Доступность действий», «Исполнение вызовов»,
 «Пачка до первого отказа», «Ссылки на ответы прошлых шагов», «Скриншоты в ответе пачки», «Служебные действия
 без очереди», «Подсказки называют действия» (specs/mcp-tools) и сценарий «Клиент из dev_ib.py client start»
@@ -12,7 +12,9 @@
   docs/spikes/testpilot-helper-restore/recording/10-live-check.jsonl (spike:spk_cff9b4db89@v3) — то же окно
     «Информация» с ключом (Python API), версия платформы 8.3.27.2342;
   docs/spikes/testpilot-helper-restore/recording/05-protocol-only.jsonl — объекты формы Request (find_objects),
-    кнопка RunClient с ключом и handle.
+    кнопка RunClient с ключом и handle;
+  docs/spikes/testpilot-cell-edit/recording/05-read-rows-focus.jsonl (spike:spk_d8a5084a0c@v1) — таблица
+    «Список» и её колонки (find_objects): get_cell_text с text: null предлагает is_visible колонки.
 
 Клиент 1С — заглушка с реестром ссылок записи (первая ссылка — e1a26d020552e-1, как в записи) в соединении пула
 с connection_id записи; чтения runtime (_window, _search_objects, _ref_live_object) отвечают записанным. Кадры
@@ -63,6 +65,10 @@ REQUEST_OBJECTS = next(r for r in H.calls(recorded.RESTORE_PROTOCOL, 'find_objec
 RUN_CLIENT = next(o for o in REQUEST_OBJECTS if o.get('name') == 'RunClient')
 RUN_CLIENT_FOUND = {'ok': True, 'objects': [
     {'ref': 'e1a26d020552e-1', **{k: v for k, v in RUN_CLIENT.items() if k not in ('key', 'handle')}}]}
+LIST_CALLS = H.calls(recorded.CELL_READ_ROWS, 'find_objects', 'M_choice_from_cell')
+LIST_TABLE = LIST_CALLS[0]['result']['objects'][0]            # таблица «Список» формы выбора
+LIST_CHILDREN = LIST_CALLS[1]['result']['objects']            # её подчинённые: группы, кнопки, 4 колонки EditField
+NAME_COLUMN = next(o for o in LIST_CHILDREN if o.get('name') == 'Наименование')
 TC_CALL = re.compile(r'tc_[a-z_]+\(')
 CUSTOM = ('execute_custom_bsl_function', 'list_custom_bsl_functions')
 
@@ -86,7 +92,7 @@ class Client:
 
     def send_cmd(self, guid, key, **kw):
         self.frames.append((guid, key, kw.get('kind')))
-        return {'ok': True}
+        return {'ok': True, 'raw': b''}      # кадр без значения: чтение ячейки → text: null
 
 
 def connect(client, cid=CONNECTION_ID):
@@ -481,6 +487,35 @@ async def test_action_documentation_and_tool_descriptions_name_actions_not_group
     texts += [await search(name) for name in action_enum(execute_tool(tools))]
     assert len(texts) == 3 + len(catalog_names(texts[2]))
     assert [t for t in texts if TC_CALL.search(t)] == []
+
+
+# ---------------------------------------------------------------- 4.13: предложенный вызов
+async def test_suggested_call_is_an_execute_step(mcp, pool, monkeypatch):
+    """4.13, сценарий «Предложенный вызов»: get_cell_text с text: null предлагает is_visible колонки
+    «Наименование» таблицы «Список» записи 05-read-rows-focus — шаг {action, args: {ref}, connection_id};
+    переданный в execute как есть, он разрешает ref в ключ и handle колонки записи. Кадр GET_CELL_TEXT
+    без текста — заглушка: записи чтения ячейки нет, suggested_call строит testpilot."""
+    client, _ = pool
+    monkeypatch.setattr(S, '_walk_tree',
+                        lambda c, root_key=None: [dict(o) for o in LIST_CHILDREN] if root_key == LIST_TABLE['key'] else [])
+    live = {o['key']: o for o in (LIST_TABLE, NAME_COLUMN)}
+    monkeypatch.setattr(S, '_ref_live_object', lambda c, key: live.get(key))
+    table_ref = client._object_handles.remember(LIST_TABLE['key'], LIST_TABLE['handle'])
+    visible = []
+    monkeypatch.setitem(S._ACTIONS[S._ACTION_GROUP['is_visible']], 'is_visible',
+                        lambda key, handle: visible.append({'key': key, 'handle': handle}) or {'ok': True, 'visible': True})
+    mcp()
+    out = await execute([{'action': 'get_cell_text', 'args': {'ref': table_ref, 'column': 'Наименование'}}])
+    assert out['ok'] is True and len(out['steps']) == 1, out
+    step = out['steps'][0]
+    assert step['text'] is None and step['value_status'] == 'unavailable' and step['column'] == 'Наименование'
+    suggested = step['suggested_call']
+    assert suggested['action'] == 'is_visible' and suggested['connection_id'] == CONNECTION_ID
+    assert set(suggested) == {'action', 'args', 'connection_id'} and list(suggested['args']) == ['ref']
+    out = await execute([suggested])                      # шаг — без правки
+    assert out['ok'] is True and out['steps'] == [{'ok': True, 'visible': True}]
+    assert visible == [{'key': NAME_COLUMN['key'], 'handle': NAME_COLUMN['handle']}]
+    assert client.frames == [(S.G.GET_CELL_TEXT, LIST_TABLE['key'], 'read')]
 
 
 # ---------------------------------------------------------------- 4.12: connect без version

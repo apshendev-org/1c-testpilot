@@ -19,7 +19,7 @@
 | Окно запущенного клиента развёрнуто | Сохранённый размер шире экрана (запись спайка) | `test_ui_feedback.py::test_windows_client_is_launched_maximized`, `::test_isolated_desktop_launch_is_unchanged` |
 | Окно запущенного клиента развёрнуто | Не Windows | `test_ui_feedback.py::test_client_without_startupinfo_is_launched_without_the_window_flag` |
 | Класс по имени типа платформы | Имя типа платформы | `test_ui_feedback.py::test_platform_type_name_in_cls_finds_the_recorded_class` |
-| Класс по имени типа платформы | Неизвестный класс | `test_ui_feedback.py::test_unknown_class_is_empty_with_the_spelling_diagnostic`, `::test_diagnostics_of_a_missing_alias_name_the_reduced_class` (красный: диагностика пустого поиска получает имя типа, а не сведённый класс — решение 4) |
+| Класс по имени типа платформы | Неизвестный класс | `test_ui_feedback.py::test_unknown_class_is_empty_with_the_spelling_diagnostic`, `::test_diagnostics_of_a_missing_alias_name_the_reduced_class` (решение 4) |
 
 - [x] 2.1 Тесты по матрице, запись `docs/spikes/testpilot-maximized-window/recording/recording.txt` — со ссылкой из теста
 
