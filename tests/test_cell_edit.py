@@ -200,12 +200,18 @@ def test_click_during_unfinished_cell_edit_is_refused_before_sending():
 
 def test_refused_begin_edit_leaves_no_unfinished_edit():
     """B: защищённая ячейка — begin_edit отвергнут клиентом, правки нет: set_area_text отвечает как
-    в записи, следующий click уходит в клиент."""
+    в записи, плюс message о защите ячейки (требование spreadsheet-edit «Отказ правки защищённой ячейки
+    называет защиту»: ЗащитаДокумента и Защита области, не фокус и не устаревшая ссылка, Защита проверяется
+    кодом), следующий click уходит в клиент."""
     grid = CellGrid()
     grid.refuses_edit = True
     grid.text = 'Бухгалтерия'        # записанный value_before
     with runtime(grid):
-        assert set_area_text(grid, 'ОАИС') == answer(CELL('B_protected_text', 'set_area_text'))
+        refused = set_area_text(grid, 'ОАИС')
+        message = refused.pop('message')
+        assert refused == answer(CELL('B_protected_text', 'set_area_text'))
+        assert all(part in message for part in ('protected', 'ЗащитаДокумента', 'Защита', 'not focus or a stale ref',
+                                                'execute_code')), message
         assert frames(grid, G.END_EDIT_CURRENT_AREA) == []
         grid.c.frames.clear()
         assert click(grid)['ok'] is True
