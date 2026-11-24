@@ -8,6 +8,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'app'))
 
 import _effects  # noqa: E402
+import _recording as recorded  # noqa: E402
 
 WINDOW = 'Window[w]'
 FORM = WINDOW + '.ManagedForm[f-1]'
@@ -201,6 +202,19 @@ def test_unchanged_state_is_repeated_once_then_fails():
     world = World()
     result = click(world, 'Заполнить', timeout=0.4)
     assert world.clicks == 2 and result['code'] == 'effect_not_observed' and result['repeated'] is True
+
+
+def test_unreadable_form_state_is_not_repeated():
+    """D (docs/spikes/testpilot-cell-edit/recording/02-no-work-window.jsonl, шаг D_click_clean): форму
+    внешней обработки обработка Testpilot не читает, изменение поля «Замеры» движок не видит — повтор
+    нажатия выполнил бы команду второй раз (в записи «Итог данных» дал +2 строки, repeated: true)."""
+    recorded_reply = recorded.direct(recorded.NO_WORK_WINDOW, 'D_click_clean', 'click')
+    assert len(recorded_reply) == 1 and recorded_reply[0]['response']['repeated'] is True   # запись — до правки
+    world = World(helper=False)
+    result = click(world, 'ФормаИтогДанных', lambda w: w.later(0, values={'Сумма': 100}), timeout=0.4)
+    assert world.clicks == 1
+    assert result['code'] == recorded_reply[0]['response']['code'] == 'effect_not_observed'
+    assert result['repeated'] is False
 
 
 def test_error_window_fails_at_once():

@@ -21,6 +21,10 @@ REFRESH = RECORDINGS / 'goto-row-refresh.jsonl'
 # Прогон 1: фикстура создаёт документ, затем первое открытие списка — окно новое.
 FIXTURE = RECORDINGS / 'goto-row-fixture.jsonl'
 PRELOADED = RECORDINGS / 'goto-row-preloaded.jsonl'
+# Спайк testpilot-cell-edit: testpilot вызывался из Python напрямую (Client.call), ответ — dict.
+CELL_EDIT = RECORDINGS / '01-cell-edit.jsonl'
+NO_WORK_WINDOW = RECORDINGS / '02-no-work-window.jsonl'
+CHOICE_FROM_CELL = RECORDINGS / '03-choice-from-cell.jsonl'
 
 
 def _indent(line):
@@ -105,3 +109,12 @@ def exchange(path=RECORDING):
 def responses(action, path=RECORDING):
     """Ответы записи для действия runtime (Client.call) в порядке записи, уже с key вместо ref."""
     return [call['response'] for call in exchange(path) if call['action'] == action]
+
+
+def direct(path, step=None, action=None):
+    """Вызовы testpilot напрямую из записи спайка cell-edit (строка {step, kind: "call", action, args,
+    result}): {step, action, arguments, response} в порядке записи; step и action — отбор."""
+    rows = [json.loads(line) for line in Path(path).read_text(encoding='utf-8').splitlines() if line.strip()]
+    return [dict(step=row['step'], action=row['action'], arguments=row.get('args') or {}, response=row['result'])
+            for row in rows if row.get('kind') == 'call'
+            and (step is None or row['step'] == step) and (action is None or row['action'] == action)]
