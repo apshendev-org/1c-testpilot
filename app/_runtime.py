@@ -1876,9 +1876,21 @@ def tc_get_active_window() -> dict:
     return w
 
 @_action('tc_window')
-def tc_activate_window() -> dict:
-    """Activate the current active window."""
+def tc_activate_window(title: str = None) -> dict:
+    """Activate a window by form title (exact, * ? wildcards; the last opened first when several match),
+    or without title re-activate the current active window."""
     c = _need()
+    if title is not None:
+        # Окно переключает активация его формы (spike: docs/spikes/testpilot-ui-feedback, 04).
+        forms = _find_wait(c, None, 'ManagedForm', None, _APPLICATION_ROOT, title, 0)
+        if not forms:
+            titles = [f.get('title') for f in _find_wait(c, None, 'ManagedForm', None, _APPLICATION_ROOT, None, 0)]
+            return {'ok': False, 'code': 'window_not_found', 'error': 'No open form has this title.',
+                    'titles': titles}
+        out = tc_activate(forms[0]['key'], forms[0]['handle'])
+        if out.get('ok') and len(forms) > 1:
+            out['matches'] = len(forms)
+        return out
     w = _window(c)
     if not w['key']:
         return {'ok': False, 'error': 'no active window'}
@@ -3931,9 +3943,19 @@ def tc_begin_edit_current_area(key: str, handle: str) -> dict:
     c = _need()
     before = _area_action_window(c)
     ok = True
-    for kind in ('action', 'commit'):
-        ok = c.send_cmd(G.BEGIN_EDIT_CURRENT_AREA, key, kind=kind, middle=b'', handle=handle)['ok'] and ok
+    try:
+        for kind in ('action', 'commit'):
+            ok = c.send_cmd(G.BEGIN_EDIT_CURRENT_AREA, key, kind=kind, middle=b'', handle=handle)['ok'] and ok
+    except tc1c.OperationError as exc:
+        if exc.status != 11:
+            raise
+        return dict(exc.result(), target=key, message=_PROTECTED_CELL)
     return _area_edit_started(c, key, handle, before, ok)
+
+
+# Защищённая ячейка отличается от свободной только отказом правки (spike: docs/spikes/testpilot-ui-feedback, 01).
+_PROTECTED_CELL = ('The cell is probably protected: the document has ЗащитаДокумента and this area has '
+                   'Защита = Истина. This is not focus or a stale ref; check Защита with execute_code.')
 
 
 def _area_edit_started(c, key, handle, before, ok):
@@ -4696,9 +4718,8 @@ def tc_current_opened(key: str, handle: str) -> dict:
     """Whether a form group is currently open."""
     c = _need()
     r = c.send_cmd(G.CURRENT_OPENED, key, kind='read', middle=RS, handle=handle)
-    # CurrentOpened reports the collapsed state on the tested 8.3.27/8.5.1 builds.
-    collapsed = _scalar(r, _bool_from_resp)
-    return {'ok': r['ok'], 'opened': None if collapsed is None else not collapsed}
+    # Ответ платформы — уже «раскрыта»: инверсия давала обратное (spike: docs/spikes/testpilot-ui-feedback, 03).
+    return {'ok': r['ok'], 'opened': _scalar(r, _bool_from_resp)}
 
 @_action('tc_field')
 def tc_title_is_shown(key: str, handle: str) -> dict:
@@ -7128,6 +7149,8 @@ def tc_set_area_text(key: str, address: str, text: str, handle: str) -> dict:
         result = _cell_result(key, before, after, text, stage, str(exc))
     except Exception as exc:
         result = _cell_result(key, before, after, text, stage, str(exc))
+        if stage == 'begin_edit' and getattr(exc, 'status', None) == 11:
+            result['message'] = _PROTECTED_CELL
     if editing:
         try:
             _cell_window(c, window)

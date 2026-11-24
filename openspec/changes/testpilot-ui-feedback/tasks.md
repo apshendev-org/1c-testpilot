@@ -4,7 +4,10 @@
 - [x] 1.2 `_effects.run`: удалить повтор и поле `repeated`
 - [x] 1.3 `_effects.run`: клик по группе — как `expect="none"`
 - [x] 1.4 `_find_wait`: имена типов платформы в `cls`
-- [x] 1.5 `docs/TOOLS.md`: `click`, `find_objects`
+- [x] 1.5 `docs/TOOLS.md`: `click`, `find_objects`, `activate_window`, правка ячейки
+- [x] 1.6 отказ правки со статусом 11 — `message` о защите
+- [x] 1.7 `current_opened` без инверсии
+- [x] 1.8 `activate_window(title)`
 
 ## 2. Тесты (отдельный поток)
 
@@ -18,10 +21,14 @@
 | Исключение без видимого эффекта | Сворачиваемая группа | `test_effects.py::test_group_click_does_not_wait_for_effect` |
 | Окно запущенного клиента развёрнуто | Сохранённый размер шире экрана (запись спайка) | `test_ui_feedback.py::test_windows_client_is_launched_maximized`, `::test_isolated_desktop_launch_is_unchanged` |
 | Окно запущенного клиента развёрнуто | Не Windows | `test_ui_feedback.py::test_client_without_startupinfo_is_launched_without_the_window_flag` |
+| Отказ правки защищённой ячейки называет защиту | Защищённая ячейка; Свободная ячейка (запись `docs/spikes/testpilot-ui-feedback/recording/01-protected-cell.jsonl`) | |
+| current_opened отвечает состояние раскрытия группы | Развёрнутая группа; Свёрнутая группа (запись `03-current-opened.jsonl`) | |
+| Активизация окна по заголовку формы | Две вкладки; Нет такой формы (запись `04-windows-by-title.jsonl`) | |
 | Класс по имени типа платформы | Имя типа платформы | `test_ui_feedback.py::test_platform_type_name_in_cls_finds_the_recorded_class` |
 | Класс по имени типа платформы | Неизвестный класс | `test_ui_feedback.py::test_unknown_class_is_empty_with_the_spelling_diagnostic`, `::test_diagnostics_of_a_missing_alias_name_the_reduced_class` (решение 4) |
 
 - [x] 2.1 Тесты по матрице, запись `docs/spikes/testpilot-maximized-window/recording/recording.txt` — со ссылкой из теста
+- [ ] 2.2 Тесты новых строк матрицы (защита ячейки, current_opened, activate_window) на записях `docs/spikes/testpilot-ui-feedback/recording/`; каждая запись спайка — со ссылкой из теста
 
 ## 3. Проверка
 
