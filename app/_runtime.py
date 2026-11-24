@@ -7097,6 +7097,7 @@ def tc_set_area_text(key: str, address: str, text: str, handle: str) -> dict:
     editing finished, but the exact value is not verified. Requires an editable document."""
     c = _need()
     stage, before, after, editing, window = 'check_target', None, None, False, None
+    protected = False
     try:
         if not re.fullmatch(r'R[1-9]\d*C[1-9]\d*', address or '') or not isinstance(text, str):
             raise _CellEditFailure('provide one cell address such as R2C1 and text')
@@ -7124,7 +7125,9 @@ def tc_set_area_text(key: str, address: str, text: str, handle: str) -> dict:
         if before == text:
             return _cell_result(key, before, before, text, 'done')
         stage = 'begin_edit'
-        _cell_step(tc_begin_edit_current_area(key, handle), 'cell editing could not be started')
+        started = tc_begin_edit_current_area(key, handle)
+        protected = started.get('message') == _PROTECTED_CELL
+        _cell_step(started, 'cell editing could not be started')
         _cell_window(c, window)
         _cell_ready(c, key, handle)
         editing = True
@@ -7147,10 +7150,10 @@ def tc_set_area_text(key: str, address: str, text: str, handle: str) -> dict:
         editing = True
     except _CellEditFailure as exc:
         result = _cell_result(key, before, after, text, stage, str(exc))
+        if protected:
+            result['message'] = _PROTECTED_CELL
     except Exception as exc:
         result = _cell_result(key, before, after, text, stage, str(exc))
-        if stage == 'begin_edit' and getattr(exc, 'status', None) == 11:
-            result['message'] = _PROTECTED_CELL
     if editing:
         try:
             _cell_window(c, window)
