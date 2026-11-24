@@ -1,11 +1,28 @@
 # Инструменты MCP-сервера
 
-Сервер публикует 11 инструментов для работы с клиентом тестирования; конкретная операция выбирается параметром `action`. Дополнительно доступны пять инструментов обработки Testpilot без `action`: код, запросы, метаданные, список и вызов пользовательских функций. Их доступность определяется настройками и реестром функций подключённой обработки. Ниже параметры для режима `id` по умолчанию. В `off` и `prefix` вместо `ref` используются `key`/`handle`, вместо `root_ref` — `root_key`. Ссылки берутся из обхода дерева (`tc_app(action="get_child_objects")` или `tc_find(action="find_object")`). Звёздочка в колонке «Параметры» помечает обязательный параметр: в объединённой схеме группы все параметры необязательны.
+Сервер публикует два инструмента:
 
-Общий необязательный параметр всех групп — `connection_id`. `ref` определяет подключение автоматически; при нескольких клиентах без `ref` нужно указать `connection_id`. Список клиентов — `tc_session(action="list_connections")`.
+- `search(query)` — каталог действий: без запроса — группы и имена действий; имя действия — его параметры (звёздочка — обязательный) и документация; слова — подходящие действия, документация первых восьми.
+- `execute(calls)` — пачка вызовов `[{"action": "<действие>", "args": {…}, "connection_id": "…"}]`, от 1 до 20, по порядку. Шаг с `ok: false` или исключением останавливает пачку. Ответ — `{ok, stopped_at, steps}`: `ok` истинно, только если исполнены все шаги, `stopped_at` — номер остановившего шага, `steps` — ответы исполненных шагов. Изображение скриншота приходит в ответе, у его шага `image: <номер>`.
 
-Лишние и пропущенные параметры действия возвращаются как `invalid_arguments` с их
-именами и правильной сигнатурой; ссылки при таком отказе не проверяются в 1С.
+Строковый аргумент целиком вида `$N.путь` заменяется значением из ответа шага `N` той же пачки (ключи и индексы списков через точку): найти и нажать — одной пачкой.
+
+```json
+{"calls": [
+  {"action": "find_object", "args": {"title": "Записать"}},
+  {"action": "click", "args": {"ref": "$0.object.ref"}}
+]}
+```
+
+Пути нет или шаг ещё не исполнен — `unresolved_reference`, команда не отправляется. Строка, которая начинается с `$$`, передаётся с одним `$` без подстановки. Пачка только из `list_connections` и `disconnect(force=true)` идёт без очереди рабочих вызовов.
+
+Ниже действия по группам; группа — только раздел каталога, вызывается действие по имени. Параметры — для режима `id` по умолчанию. В `off` и `prefix` вместо `ref` используются `key`/`handle`, вместо `root_ref` — `root_key`. Ссылки берутся из обхода дерева (`get_child_objects` или `find_object`).
+
+Общий необязательный параметр вызова — `connection_id`. `ref` определяет подключение автоматически; при нескольких клиентах без `ref` нужно указать `connection_id`. Список клиентов — `list_connections`.
+
+Лишние и пропущенные параметры действия, неверные типы возвращаются как `invalid_arguments` с
+правильной сигнатурой; команда при таком отказе в 1С не отправляется. Неизвестное действие —
+`unknown_action` с похожими именами, пачка не исполняется.
 
 В компактных MCP-ответах `click`, `execute_command`, `choose_from_drop_list` и
 `execute_choice_from_choice_list` повторное описание окна заменяется на
@@ -14,7 +31,7 @@
 окна сохраняются. Это не проверка изменений содержимого формы. Полные ответы
 (`TC1C_RESPONSE_DETAIL=full`), Python API и журнал сохраняют блок окна.
 
-## `tc_field` — Actions on a form field, button, group or element addition. Choose `action`.
+## `field` — Actions on a form field, button, group or element addition.
 
 При включённой проверке результата выбор из списка возвращает `window`, если открылось
 другое окно: прочитайте его перед продолжением. После выбора строки в форме, открытой
@@ -127,9 +144,9 @@ this object» (`unsupported_receiver`, список ещё не сформиро
 через форму выбора. Вместо `value` можно передать `match` с точными значениями
 колонок формы выбора:
 
-```python
-tc_field(action="select_value", ref="…", value="Ромашка")
-tc_field(action="select_value", ref="…", match={"Наименование": "Ромашка", "ИНН": "7701234567"})
+```json
+{"action": "select_value", "args": {"ref": "…", "value": "Ромашка"}}
+{"action": "select_value", "args": {"ref": "…", "match": {"Наименование": "Ромашка", "ИНН": "7701234567"}}}
 ```
 
 - `choice_table` — имя таблицы выбора; `choice_column` — заголовок колонки для поиска `value`.
@@ -141,12 +158,12 @@ tc_field(action="select_value", ref="…", match={"Наименование": "�
 `set_fields` заполняет поля одной формы по порядку. В каждой записи укажите адрес
 и один вариант: `text`, `checked` или `select` с параметрами `select_value`:
 
-```python
-tc_field(action="set_fields", entries=[
-    {"ref": "…", "select": {"value": "Ромашка"}},
-    {"ref": "…", "text": "Комментарий"},
-    {"ref": "…", "checked": True},
-])
+```json
+{"action": "set_fields", "args": {"entries": [
+  {"ref": "…", "select": {"value": "Ромашка"}},
+  {"ref": "…", "text": "Комментарий"},
+  {"ref": "…", "checked": true}
+]}}
 ```
 
 В `select` можно передать `match` и остальные параметры выбора; `timeout` ограничивает
@@ -157,7 +174,7 @@ tc_field(action="set_fields", entries=[
 Служебная обработка не требуется. После отказа окно выбора может остаться открытым:
 завершите или отмените выбор перед повторным вызовом на исходном поле.
 
-## `tc_table` — Read and edit table or tree rows, manage selection and expand or collapse nodes. Choose `action`.
+## `table` — Read and edit table or tree rows, manage selection and expand or collapse nodes.
 
 | Действие | Метод 1С | Применим к типам | Параметры |
 |---|---|---|---|
@@ -228,7 +245,7 @@ tc_field(action="set_fields", entries=[
 
 ```python
 conditions = [{"column": "Наименование", "text": "Лом латуни микс", "match": "exact"}]
-tc_table(action="find_rows", ref="…", conditions=conditions)  # MCP
+# MCP: {"action": "find_rows", "args": {"ref": "…", "conditions": conditions}}
 tbl.find_rows(conditions=conditions)  # Python API
 ```
 
@@ -239,10 +256,12 @@ tbl.find_rows(conditions=conditions)  # Python API
 
 `search` вводит текст в строку поиска указанной таблицы и возвращает строки результата:
 
-```python
-tc_table(action="search", ref="…", text="Ромашка")
-tc_table(action="search", ref="…", text="")  # Очистить поиск.
+```json
+{"action": "search", "args": {"ref": "…", "text": "Ромашка"}}
+{"action": "search", "args": {"ref": "…", "text": ""}}
 ```
+
+Пустой `text` очищает поиск.
 
 Текущие отборы сохраняются. Проверяются текст поиска и совпадение двух чтений строк
 с интервалом `settle_time` (по умолчанию 2 секунды); это наблюдение стабильности,
@@ -262,11 +281,11 @@ tc_table(action="search", ref="…", text="")  # Очистить поиск.
 таблице списка и открывают её стандартную форму «Настройка списка». Служебная обработка
 не требуется. Перед вызовом завершите редактирование строки и активируйте окно списка.
 
-```python
-tc_table(action="get_list_settings_fields", ref="…", section="filters")
-tc_table(action="set_list_settings", ref="…",
-         filters=[{"field": "Наименование", "comparison": "contains", "value": "Кабель"}],
-         orders=[{"field": "Наименование", "direction": "asc"}], replace=True)
+```json
+{"action": "get_list_settings_fields", "args": {"ref": "…", "section": "filters"}}
+{"action": "set_list_settings", "args": {"ref": "…",
+  "filters": [{"field": "Наименование", "comparison": "contains", "value": "Кабель"}],
+  "orders": [{"field": "Наименование", "direction": "asc"}], "replace": true}}
 ```
 
 - `field` — точное название доступного поля, `value` — вводимый текст. Неоднозначные названия отклоняются.
@@ -280,7 +299,7 @@ tc_table(action="set_list_settings", ref="…",
 Чтение закрывает только самостоятельно открытую форму. Поддерживается стандартная
 форма настройки списка; создание вложенных групп условий не поддерживается.
 
-## `tc_doc` — Actions on document fields and spreadsheet areas. Choose `action`.
+## `doc` — Actions on document fields and spreadsheet areas.
 
 | Действие | Метод 1С | Применим к типам | Параметры |
 |---|---|---|---|
@@ -306,7 +325,7 @@ tc_table(action="set_list_settings", ref="…",
 | `text_within_area_bounds` | `ТестируемоеПолеФормы` · ТекстВПределахГраницОбласти (`TextIsWithinAreaBounds`) | `ТестируемоеПолеФормы` | `ref*, area=None` |
 | `write_content_to_file` | `ТестируемоеПолеФормы` · ЗаписатьСодержимоеВФайл (`WriteContentToFile`) | `ТестируемоеПолеФормы` | `ref*, filename=None, file_format=None, filter_index=None, save_as=None` |
 
-## `tc_window` — Actions on the client application window.
+## `window` — Actions on the client application window.
 
 | Действие | Метод 1С | Применим к типам | Параметры |
 |---|---|---|---|
@@ -347,7 +366,7 @@ tc_table(action="set_list_settings", ref="…",
 Системное меню в заголовке окна («Настройки», «Скрыть все панели» и другие пункты)
 недоступно через `get_command_interface`, в том числе с `all_sections=True`:
 это ограничение тестового протокола платформы 1С. Для команд с сочетаниями клавиш
-используйте `tc_keyboard`: `list_shortcuts` — поиск сочетания, `send_keys` — отправка.
+используйте группу `keyboard`: `list_shortcuts` — поиск сочетания, `send_keys` — отправка.
 
 С `all_sections=True` первый вызов обходит панель разделов, включая «Главное», и возвращает **только их названия,
 идентификаторы `section` и количество команд**. Затем передайте `section` (идентификатор
@@ -373,7 +392,7 @@ tc_table(action="set_list_settings", ref="…",
 Таймаут всего обхода, включая ожидание готовности, — 120 секунд, допустим диапазон больше 0 и до 3600;
 один каталог ограничен 10 000 команд и 4 МиБ. Поиск не обновляет ранее собранное меню.
 
-## `tc_app` — Application-level state: active window, child objects, errors, dialogs, limits.
+## `app` — Application-level state: active window, child objects, errors, dialogs, limits.
 
 | Действие | Метод 1С | Применим к типам | Параметры |
 |---|---|---|---|
@@ -388,7 +407,7 @@ tc_table(action="set_list_settings", ref="…",
 | `set_file_dialog_result` | `ТестируемоеПриложение` · УстановитьРезультатДиалогаВыбораФайла (`SetFileDialogResult`) | `ТестируемоеПриложение` | `result=True, filename=None, filter_index=0` |
 | `set_max_action_time` | `ТестируемоеПриложение` · УстановитьМаксимальноеВремяВыполненияДействия (`SetMaxActionExecutionTime`) | `ТестируемоеПриложение` | `seconds*` |
 
-## `tc_form` — Actions on the managed form itself, including navigation between form elements and reading the focused element. Choose `action`.
+## `form` — Actions on the managed form itself, including navigation between form elements and reading the focused element.
 
 | Действие | Метод 1С | Применим к типам | Параметры |
 |---|---|---|---|
@@ -478,7 +497,7 @@ tc_table(action="set_list_settings", ref="…",
 
 Обогащение не меняет сохранённые снимки форм и поиск через `find_objects`.
 
-## `tc_scenario` — Record and replay UI scenarios.
+## `scenario` — Record and replay UI scenarios.
 
 | Действие | Метод 1С | Применим к типам | Параметры |
 |---|---|---|---|
@@ -495,7 +514,7 @@ tc_table(action="set_list_settings", ref="…",
 При включённом логировании подробные шаги сохраняются независимо от режима ответа;
 поле `logging` содержит пути к журналу и доступным отчётам.
 
-## `tc_session` — Connect to, launch or stop the 1C test client.
+## `session` — Connect to, launch or stop the 1C test client.
 
 | Действие | Метод 1С | Применим к типам | Параметры |
 |---|---|---|---|
@@ -509,10 +528,10 @@ tc_table(action="set_list_settings", ref="…",
 | `stop_client` | — | — | `graceful_timeout=15` |
 | `stop_logging` | Завершить журнал MCP-вызовов | — | `—` |
 
-## `tc_calendar` — Действия с полем календаря
+## `calendar` — Действия с полем календаря
 
 Действия применимы только к `type="CalendarField"`. Для обычного поля ввода даты
-(`type="InputField"`) используйте `tc_field(action="input_text")` с датой в формате поля.
+(`type="InputField"`) используйте `input_text` с датой в формате поля.
 
 | Действие | Метод 1С | Применим к типам | Параметры |
 |---|---|---|---|
@@ -522,7 +541,7 @@ tc_table(action="set_list_settings", ref="…",
 | `calendar_previous_year` | `ТестируемоеПолеФормы` · ПерейтиНаГодНазад (`GotoPreviousYear`) | `ТестируемоеПолеФормы` | `ref*` |
 | `goto_date` | `ТестируемоеПолеФормы` · ПерейтиКДате (`GotoDate`) | `ТестируемоеПолеФормы` | `ref*, year*, month*, day*` |
 
-## `tc_find` — Search the UI tree for objects.
+## `find` — Search the UI tree for objects.
 
 | Действие | Метод 1С | Применим к типам | Параметры |
 |---|---|---|---|
@@ -532,10 +551,12 @@ tc_table(action="set_list_settings", ref="…",
 
 Без `limit` поиск возвращает все совпадения. Для листания:
 
-```python
-tc_find(action="find_objects", cls="EditField", limit=20)
-tc_find(action="find_objects", cursor="…")  # next_cursor из предыдущего ответа.
+```json
+{"action": "find_objects", "args": {"cls": "EditField", "limit": 20}}
+{"action": "find_objects", "args": {"cursor": "…"}}
 ```
+
+`cursor` — `next_cursor` из предыдущего ответа.
 
 Страница содержит `total`, `returned`, `offset`, `has_more`, `next_cursor`.
 `limit` — от 1 до 1000; при продолжении передаётся только курсор и, при необходимости,
@@ -544,7 +565,7 @@ tc_find(action="find_objects", cursor="…")  # next_cursor из предыду�
 Просроченный курсор даёт `cursor_unavailable`; нужно начать поиск заново.
 Листание не перечитывает 1С, поэтому доступность найденного элемента проверяется при обращении к нему.
 
-## `tc_keyboard` — Сочетания клавиш
+## `keyboard` — Сочетания клавиш
 
 | Действие | Параметры |
 | --- | --- |
@@ -584,11 +605,11 @@ Testpilot, возвращается `keyboard_permission_required`. Удалён
 Справочник содержит сочетания управляемого приложения для Windows и Linux;
 их доступность зависит от версии платформы, текущего элемента и конфигурации.
 
-## Дополнительные инструменты выполнения
+## Действия обработки Testpilot
 
 Код, запросы и пользовательские функции включаются независимо. Метаданные по умолчанию
 включаются вместе с кодом или запросами; их можно включить и выключить отдельно.
-Инструменты функций видны при непустом реестре подключённой обработки. Параметра `action` нет.
+Действия функций доступны в `execute` при непустом реестре подключённой обработки.
 Требуется [Testpilot.epf](../onec/Testpilot/README.md), автоматически открываемая при запуске клиента.
 
 Пользователю без права на внешние обработки 1С показывает при запуске «запрещен запуск внешних
@@ -599,17 +620,17 @@ Testpilot, возвращается `keyboard_permission_required`. Удалён
 Код с `context="client"` не делегируется: `client_code_unavailable`. Подходящего профиля нет или
 он не запустился — `admin_client_unavailable`, в `profile` — имя профиля, который нужно добавить.
 
-| Инструмент | Назначение | Параметры |
+| Действие | Назначение | Параметры |
 |---|---|---|
-| `tc_execute_code` | Выполнить BSL; параметры доступны как `Параметры["имя"]`, результат присваивается `Результат` | `code*, context*` (`client`/`server`), `parameters={}, timeout=180, connection_id=None` |
-| `tc_execute_query` | Выполнить запрос с параметрами и текущими правами пользователя; вернуть `columns`, `rows`, `returned_rows`, `limit`, `truncated` | `query*, parameters={}, limit=100` (1–500), `timeout=180, connection_id=None` |
-| `tc_get_metadata` | Обзор конфигурации, поиск объектов и полей, подробности по полному имени | `name=None, meta_type=None, search=None, field_search=None, sections=None, limit=100` (1–500), `offset=0, timeout=180, connection_id=None` |
-| `tc_list_custom_bsl_functions` | Зарегистрированные пользовательские BSL-функции с описанием контекста, параметров и результата | `connection_id=None` |
-| `tc_execute_custom_bsl_function` | Вызвать зарегистрированную функцию в указанном при регистрации контексте | `name*, parameters={}, timeout=180, connection_id=None` |
+| `execute_code` | Выполнить BSL; параметры доступны как `Параметры["имя"]`, результат присваивается `Результат` | `code*, context*` (`client`/`server`), `parameters={}, timeout=180, connection_id=None` |
+| `execute_query` | Выполнить запрос с параметрами и текущими правами пользователя; вернуть `columns`, `rows`, `returned_rows`, `limit`, `truncated` | `query*, parameters={}, limit=100` (1–500), `timeout=180, connection_id=None` |
+| `get_metadata` | Обзор конфигурации, поиск объектов и полей, подробности по полному имени | `name=None, meta_type=None, search=None, field_search=None, sections=None, limit=100` (1–500), `offset=0, timeout=180, connection_id=None` |
+| `list_custom_bsl_functions` | Зарегистрированные пользовательские BSL-функции с описанием контекста, параметров и результата | `connection_id=None` |
+| `execute_custom_bsl_function` | Вызвать зарегистрированную функцию в указанном при регистрации контексте | `name*, parameters={}, timeout=180, connection_id=None` |
 
 Даты, ссылки и перечисления передаются в [типизированном JSON-представлении](../onec/Testpilot/README.md#типы-значений).
 
-Отдельный инструмент [`tc_run_compatible_scenario`](compatible_scenarios/README.md)
+Действие [`run_compatible_scenario`](compatible_scenarios/README.md)
 запускает поддерживаемые сценарии Тестера. Параметры:
 `path`, `framework='tester'`, `parameters`, `roots`, `timeout=1800`,
 `check_only=false`, `application_name=''`, `stop_on_failure=false`,

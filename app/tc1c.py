@@ -1549,7 +1549,7 @@ class TestClient:
                     size = len(self._buf)
                     raise ConnectionError('The test client closed the connection before a complete response '
                                           'was received (%d bytes received). Reconnect with '
-                                          'tc_session(action="connect").' % size)
+                                          'connect.' % size)
                 self._buf+=d
         except socket.timeout:
             raise                   # the remaining bytes may still arrive; preserve the buffer
@@ -1561,7 +1561,7 @@ class TestClient:
         if self._interrupted:
             raise ConnectionError('The connection was forcibly disconnected. The outcome of the interrupted action may be unknown.')
         if self.s is None:
-            raise ConnectionError('The test-client connection is closed. Reconnect with tc_session(action="connect").')
+            raise ConnectionError('The test-client connection is closed. Reconnect with connect.')
 
     def _recv(self, timeout=0, *, binary=None):
         """timeout: 0 — политика по умолчанию (_recv_timeout), None — без ограничения,
@@ -1583,8 +1583,8 @@ class TestClient:
                 reply = self._read_frame(self.RESYNC_TIMEOUT)
             except socket.timeout:
                 raise RuntimeError('the connection desynchronised after a timeout: %d answer(s) to '
-                                   'earlier commands were never received — call tc_disconnect '
-                                   'and tc_connect' % self._pending)
+                                   'earlier commands were never received — call disconnect '
+                                   'and connect' % self._pending)
             self._pending -= 1
             # A composite operation may need the late status before sending its next frame.
             callback = vars(self).pop('_pending_reply_callback', None)

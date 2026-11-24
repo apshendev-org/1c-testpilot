@@ -83,8 +83,8 @@ python onec/Testpilot/build.py --exe "C:/Program Files/1cv8/8.3.27.1936/bin/1cv8
 ```
 
 Для MCP задайте путь к своей EPF и `TC1C_FUNCTIONS=true`. После запуска клиента
-инструмент `tc_list_custom_bsl_functions` покажет зарегистрированные функции,
-а `tc_execute_custom_bsl_function` выполнит выбранную:
+действие `list_custom_bsl_functions` покажет зарегистрированные функции,
+а `execute_custom_bsl_function` выполнит выбранную:
 
 ```json
 {"name": "СложитьЧисла", "parameters": {"числа": [10, 20, 30]}}

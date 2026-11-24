@@ -344,8 +344,14 @@ def respond(payload, addrs=False):
     # output schema, подмена типа сломала бы валидацию структурированного вывода
     if not isinstance(payload, (dict, list)):
         return payload
-    data = (_compact_payload(payload) if COMPACT else _norm_payload(payload)) if addrs else payload
-    return _toon_encode(data)
+    return _toon_encode(prepare(payload, addrs))
+
+
+def prepare(payload, addrs=False):
+    """Ответ без кодирования: адреса ADDR_TOOLS сжаты так же, как в respond."""
+    if FORMAT != 'toon' or not addrs or not isinstance(payload, (dict, list)):
+        return payload
+    return _compact_payload(payload) if COMPACT else _norm_payload(payload)
 
 
 def check_ref_args(kwargs):

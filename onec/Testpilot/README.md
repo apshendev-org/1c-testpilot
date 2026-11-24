@@ -57,15 +57,15 @@ TC1C_FORM_DETAILS=auto
 
 | Инструмент | Параметры | Результат |
 |---|---|---|
-| `tc_execute_code` | `code`, `context="client"` или `"server"`, `parameters={}`, `timeout=180`, необязательный `connection_id` | `ok`, `request_id`, `result` либо ошибка |
-| `tc_execute_query` | `query`, `parameters={}`, `limit=100` (1–500), `timeout=180`, необязательный `connection_id` | `ok`, `request_id`, `columns`, `rows`, `returned_rows`, `limit`, `truncated` |
-| `tc_get_metadata` | `name`, либо `meta_type`, `search`, `field_search`; `sections`, `limit=100`, `offset=0`, `timeout=180`, `connection_id` | Обзор, список или подробности метаданных, `complete`, `errors` |
-| `tc_list_custom_bsl_functions` | Необязательный `connection_id` | `functions`: описания зарегистрированных BSL-функций |
-| `tc_execute_custom_bsl_function` | `name`, `parameters={}`, `timeout=180`, `connection_id` | `ok`, `request_id`, `result` либо ошибка |
+| `execute_code` | `code`, `context="client"` или `"server"`, `parameters={}`, `timeout=180`, необязательный `connection_id` | `ok`, `request_id`, `result` либо ошибка |
+| `execute_query` | `query`, `parameters={}`, `limit=100` (1–500), `timeout=180`, необязательный `connection_id` | `ok`, `request_id`, `columns`, `rows`, `returned_rows`, `limit`, `truncated` |
+| `get_metadata` | `name`, либо `meta_type`, `search`, `field_search`; `sections`, `limit=100`, `offset=0`, `timeout=180`, `connection_id` | Обзор, список или подробности метаданных, `complete`, `errors` |
+| `list_custom_bsl_functions` | Необязательный `connection_id` | `functions`: описания зарегистрированных BSL-функций |
+| `execute_custom_bsl_function` | `name`, `parameters={}`, `timeout=180`, `connection_id` | `ok`, `request_id`, `result` либо ошибка |
 
 ### Метаданные
 
-`TC1C_METADATA=auto` (по умолчанию) публикует `tc_get_metadata`, если включён код
+`TC1C_METADATA=auto` (по умолчанию) публикует `get_metadata`, если включён код
 или запросы. `true` включает его независимо, `false` скрывает. При отдельном включении
 метаданных сервер тоже автоматически запускает обработку по `TC1C_CODE_EPF`.
 

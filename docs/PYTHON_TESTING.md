@@ -185,7 +185,7 @@ with Client(profile="ut_admin") as client:
 Два теста не должны одновременно управлять одним и тем же внешним клиентом 1С.
 
 - `client.call("действие", **параметры)` предоставляет все действия из
-  [справочника инструментов](TOOLS.md). Префикс группы `tc_field` не нужен.
+  [справочника инструментов](TOOLS.md). Группа не указывается.
 - `client.input_text(...)` и другие методы с именем действия эквивалентны `call`.
 - `client.find_objects(...)` возвращает список `Element`;
   `client.find_object(...)` требует **ровно одно** совпадение. Если нужно штатное
@@ -246,7 +246,7 @@ if page["has_more"]:
 
 Вместо `search` можно передать `section` из обзора или точное название раздела.
 Поиск и страницы читаются из памяти; `refresh=True` повторяет обход.
-Для другого окна передайте `key=window.key`. Подробнее — [параметры и результаты](TOOLS.md#tc_window--actions-on-the-client-application-window).
+Для другого окна передайте `key=window.key`. Подробнее — [параметры и результаты](TOOLS.md#window--actions-on-the-client-application-window).
 
 ## Несколько полей, таблицы и снимки
 
@@ -314,7 +314,7 @@ counterparty.select_value(match={"Наименование": "Ромашка", "
 `expected` дополнительно проверяет текст поля после выбора. Неоднозначность и
 превышение `max_rows` останавливают действие. Для ячейки таблицы сначала установите
 нужную строку; после выбора её редактирование остаётся открытым. Служебная обработка
-не требуется. [Параметры выбора](TOOLS.md#tc_field--actions-on-a-form-field-button-group-or-element-addition-choose-action).
+не требуется. [Параметры выбора](TOOLS.md#field--actions-on-a-form-field-button-group-or-element-addition).
 
 Поиск средствами самой 1С запускается одним действием:
 
@@ -347,7 +347,7 @@ table.set_list_settings(filters=[], replace=True)  # Убрать отбор, о
 Названия полей берутся из `get_list_settings_fields`, значения передаются текстом,
 как при ручном вводе. По умолчанию настройки дополняются; `replace=True` заменяет
 только переданные разделы. При ошибке частичные изменения остаются в открытой форме.
-Подробности параметров — в [описании действий таблицы](TOOLS.md#tc_table--read-and-edit-table-or-tree-rows-manage-selection-and-expand-or-collapse-nodes-choose-action).
+Подробности параметров — в [описании действий таблицы](TOOLS.md#table--read-and-edit-table-or-tree-rows-manage-selection-and-expand-or-collapse-nodes).
 
 ## Ошибки и отчёты
 
@@ -555,7 +555,7 @@ def test_document_was_saved(testpilot):
 `client.send_keys(keys=["CTRL", "SHIFT", "BACKQUOTE"])` отправляет сочетание активному
 локальному окну; здесь — переключает панели. `client.list_shortcuts(search="панели")`
 ищет сочетания в справочнике без подключения. Отправка не подтверждает выполнение
-команды: проверяйте результат. Подробнее — [сочетания клавиш](TOOLS.md#tc_keyboard--сочетания-клавиш).
+команды: проверяйте результат. Подробнее — [сочетания клавиш](TOOLS.md#keyboard--сочетания-клавиш).
 
 `field.send_keys(keys=["HOME"])` переключает на окно найденного поля, устанавливает
 фокус и отправляет клавишу после проверки адресата. Аналогично работает

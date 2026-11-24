@@ -238,7 +238,7 @@ def present(payload, action, registry):
             pairs.setdefault(key, registry.get(key))
             echoes[field] = key
     suggestion = payload.get('suggested_call') if action in ('set_cell_text', 'get_cell_text') else None
-    args = suggestion.get('arguments') if isinstance(suggestion, dict) else None
+    args = suggestion.get('args') if isinstance(suggestion, dict) else None
     argument_targets = {}
     if isinstance(args, dict):
         for field in ('key', 'root_key'):
@@ -349,5 +349,5 @@ def present(payload, action, registry):
             converted.pop(field)
             converted['root_ref' if field == 'root_key' else 'ref'] = refs[key]
         converted.pop('handle', None)
-        out['suggested_call'] = {**suggestion, 'arguments': converted}
+        out['suggested_call'] = {**suggestion, 'args': converted}
     return out

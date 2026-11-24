@@ -67,6 +67,7 @@ _log_auto_start = LOGGING and _call_logging.enabled('TC1C_LOG_AUTO_START', 'fals
 # allows it to coexist with MCP and other Python sessions in the same process.
 _execution = ContextVar('testpilot_execution', default=None)
 _format_result = None
+_batch = ContextVar('testpilot_batch', default=False)
 
 
 def _address_mode():
@@ -91,6 +92,9 @@ def _journal_store():
 def _deliver(result, *, addrs=False):
     if _execution.get() is not None or _format_result is None:
         return result
+    if _batch.get():
+        # Шаг пачки execute: ответ кодируется один раз вместе с пачкой.
+        return result if isinstance(result, _screenshots.Screenshot) else _response.prepare(result, addrs)
     return _format_result(result, addrs=addrs)
 
 
@@ -285,7 +289,7 @@ def _need():
     вызывающего инструмента (TOOL_MIN_VERSION): старому клиенту нельзя слать неизвестный
     GUID — он не отвечает, и вызов висит до таймаута сокета."""
     if not _state['client']:
-        raise RuntimeError('not connected — call tc_connect first')
+        raise RuntimeError('not connected — call connect first')
     c = _state['client']
     action = sys._getframe(1).f_code.co_name
     minv = TOOL_MIN_VERSION.get(action)
@@ -529,7 +533,7 @@ def _blocked_by_version(action, c):
 def _absent_error(key, check='absent'):
     return {'ok': False, 'target': key, 'target_check': check,
             'error': 'no object at this address: %s. Addresses come from walking the tree '
-                     '(tc_app(action="get_child_objects") / tc_find(action="find_objects")), '
+                     '(get_child_objects / find_objects), '
                      'they are not composed by hand.' % key}
 
 # Действия, перед которыми проверяется существование цели. Перечень ЯВНЫЙ: вид кадра семантику не
@@ -1087,7 +1091,7 @@ def _verified(fn, action):
                                        'pending' if res['committed'] is False else 'unverified')
                 if res['committed'] is False:
                     res['suggested_action'] = 'goto_next_element'
-                    res['message'] = ('Input is pending. Call tc_form(action="goto_next_element") on the owning form '
+                    res['message'] = ('Input is pending. Call goto_next_element on the owning form '
                                       'to finish input, or activate another focusable element; '
                                       'a reference field may require choosing a matching item.')
                 # текст не записан — единственная ветка, где стоит спросить о доступности:
@@ -2024,7 +2028,7 @@ def tc_input_text(key: str, text: str, handle: str, finish: bool = True) -> dict
         if _table_owner(key):
             return dict(exc.result(), input_status='rejected', committed=None,
                         suggested_action='set_cell_text',
-                        message='This is a table column. Use tc_table(action="set_cell_text") '
+                        message='This is a table column. Use set_cell_text '
                                 'on its table with the column element name and the requested text.')
         return dict(exc.result(), input_status='rejected', committed=None,
                     suggested_action='start_choosing',
@@ -2469,8 +2473,8 @@ def tc_is_enabled(key: str, handle: str) -> dict:
 def tc_is_readonly(key: str, handle: str) -> dict:
     """Whether an element is currently read-only — that is the element's own read-only property.
     Two other things look the same and are NOT this: an element switched off entirely (read that
-    with tc_field(action="is_enabled")), and a spreadsheet-document field shown in view mode,
-    which neither read reflects — there, tc_doc(action="begin_edit_current_area") runs the cell's
+    with is_enabled), and a spreadsheet-document field shown in view mode,
+    which neither read reflects — there, begin_edit_current_area runs the cell's
     details instead of editing."""
     c = _need()
     r = c.send_cmd(G.CURRENT_READONLY, key, kind='read', middle=RS, handle=handle)
@@ -2571,7 +2575,7 @@ def tc_choose_from_drop_list(key: str, value: str | int, handle: str) -> dict:
 @_action('tc_field')
 def tc_increase_value(key: str, handle: str) -> dict:
     """Increment a numeric (spinner) field. A track bar does NOT take this — move it with
-    tc_field(action="goto_value") in percent. When the value does not move, `applicable: false`
+    goto_value in percent. When the value does not move, `applicable: false`
     in the answer means the method does not fit this kind of field."""
     c = _need()
     ok = True
@@ -2582,7 +2586,7 @@ def tc_increase_value(key: str, handle: str) -> dict:
 @_action('tc_field')
 def tc_decrease_value(key: str, handle: str) -> dict:
     """Decrement a numeric (spinner) field. A track bar does NOT take this — move it with
-    tc_field(action="goto_value") in percent. When the value does not move, `applicable: false`
+    goto_value in percent. When the value does not move, `applicable: false`
     in the answer means the method does not fit this kind of field."""
     c = _need()
     ok = True
@@ -3203,7 +3207,7 @@ def tc_goto_next_item(key: str, handle: str) -> dict:
     if _key_class(key) != 'Table':
         return {'ok': False, 'target': key, 'code': 'unsupported_element_type',
                 'error': 'This action requires a table. For form navigation use '
-                         'tc_form(action="goto_next_element") on the managed form.'}
+                         'goto_next_element on the managed form.'}
     c = _need()
     ok = True
     for kind in ('action', 'commit'):
@@ -3216,7 +3220,7 @@ def tc_goto_previous_item(key: str, handle: str) -> dict:
     if _key_class(key) != 'Table':
         return {'ok': False, 'target': key, 'code': 'unsupported_element_type',
                 'error': 'This action requires a table. For form navigation use '
-                         'tc_form(action="goto_previous_element") on the managed form.'}
+                         'goto_previous_element on the managed form.'}
     c = _need()
     ok = True
     for kind in ('action', 'commit'):
@@ -3803,7 +3807,7 @@ def tc_click_html_hyperlink(key: str, index: int | str, handle: str) -> dict:
 def tc_click_formatted_doc_hyperlink(key: str, index: int | str, handle: str) -> dict:
     """Click a hyperlink in a formatted-document field by 0-based index (or by its text). On a
     document without links the platform answers the same and puts up its own error window, and
-    tc_doc(action="get_formatted_string_hyperlinks") cannot be used to check first: for a
+    get_formatted_string_hyperlinks cannot be used to check first: for a
     formatted DOCUMENT it answers with an empty list even when the document does have a link (it
     lists links only for a formatted-string label). Judge by what the click was supposed to do."""
     c = _need()
@@ -3892,14 +3896,14 @@ def tc_get_current_area_address(key: str, handle: str) -> dict:
 @_action('tc_doc')
 def tc_get_current_area_text(key: str, handle: str, area: str = None) -> dict:
     """Get the text of ONE spreadsheet-document area; omit area to read the current one. This is the
-    older form of tc_doc(action="get_area_text"), which the platform deprecated in 8.3.6 in
+    older form of get_area_text, which the platform deprecated in 8.3.6 in
     favour of that one; prefer get_area_text."""
     return _area_text_read(_need(), G.GET_CURRENT_AREA_TEXT, key, handle, area)
 
 @_action('tc_doc')
 def tc_get_area_text(key: str, handle: str, area: str = None) -> dict:
     """Get the text of ONE spreadsheet-document area; omit area to read the current one.
-    tc_doc(action="get_current_area_text") is the older form of this same call and answers
+    get_current_area_text is the older form of this same call and answers
     identically; prefer this one."""
     return _area_text_read(_need(), G.GET_AREA_TEXT, key, handle, area)
 
@@ -4342,7 +4346,7 @@ def tc_start_choosing_from_choice_list(key: str, handle: str) -> dict:
 def tc_execute_choice_from_choice_list(key: str, value: str | int, handle: str) -> dict:
     """Pick from a field's choice list by its display text or by its 0-based index. Reports
     changed/value_before/value_after — the field's value read before and after, same as
-    tc_field(action="choose_from_drop_list"). A changed window is returned with readback enabled.
+    choose_from_drop_list. A changed window is returned with readback enabled.
     window_changed=false reuses the previous window description."""
     c = _need()
     ok = True
@@ -4461,7 +4465,7 @@ def tc_drop_list_is_open(key: str, handle: str) -> dict:
 
 @_action('tc_field')
 def tc_close_drop_list(key: str, handle: str) -> dict:
-    """Close a field's drop-down list. Verify with tc_field(action="drop_list_is_open")."""
+    """Close a field's drop-down list. Verify with drop_list_is_open."""
     c = _need()
     ok = True
     for kind in ('action', 'commit'):    # без коммита список остаётся открытым
@@ -4547,7 +4551,7 @@ def tc_get_current_item(key: str, handle: str) -> dict:
     if _key_class(key) != 'Table':
         return {'ok': False, 'target': key, 'code': 'unsupported_element_type',
                 'error': 'This action requires a table. To read a form\'s focused element use '
-                         'tc_form(action="get_current_element") on the managed form.'}
+                         'get_current_element on the managed form.'}
     c = _need()
     r = c.send_cmd(G.GET_CURRENT_ITEM, key, kind='read', middle=RC, handle=handle)
     return {'ok': r['ok'], 'item': _coll(r, key)}
@@ -4582,11 +4586,11 @@ def _read_cell_text(c, key, handle, column, *, resolved=()):
                                        'null alone does not distinguish these cases.')
     if text is None and r['ok']:
         if len(resolved) == 1:
-            result['suggested_call'] = {'tool': 'tc_field', 'arguments': {
-                'action': 'is_visible', 'key': resolved[0]['key'], 'handle': resolved[0]['handle']}}
+            result['suggested_call'] = {'action': 'is_visible', 'args': {
+                'key': resolved[0]['key'], 'handle': resolved[0]['handle']}}
         else:
-            result['suggested_call'] = {'tool': 'tc_find', 'arguments': {
-                'action': 'find_objects', 'root_key': key}}
+            result['suggested_call'] = {'action': 'find_objects', 'args': {
+                'root_key': key}}
     return result
 
 
@@ -7000,8 +7004,8 @@ def tc_set_cell_text(key: str, column: str, text: str, handle: str) -> dict:
                 if current.get('ok') and len(matches) == 1:
                     actual = matches[0]
                     _cell_ready(c, actual['key'], actual['handle'])
-                    result['suggested_call'] = {'tool': 'tc_field', 'arguments': {
-                        'action': 'start_choosing', 'key': actual['key'], 'handle': actual['handle']}}
+                    result['suggested_call'] = {'action': 'start_choosing', 'args': {
+                        'key': actual['key'], 'handle': actual['handle']}}
                     result['message'] += ' If the current editor selects an object, use suggested_call to choose it.'
                 return result
         except Exception:
@@ -7025,8 +7029,8 @@ def tc_set_cell_text(key: str, column: str, text: str, handle: str) -> dict:
                     _cell_window(c, window)
                     _cell_ready(c, actual['key'], actual['handle'])
                     if sum(o.get('name') == actual.get('name') for o in columns) == 1:
-                        result['suggested_call'] = {'tool': 'tc_table', 'arguments': {
-                            'action': 'set_cell_text', 'key': key, 'handle': handle,
+                        result['suggested_call'] = {'action': 'set_cell_text', 'args': {
+                            'key': key, 'handle': handle,
                             'column': actual['name'], 'text': text}}
                         result['message'] = ('The form focused another column. No text was entered. '
                                              'Use suggested_call only if current_item is the intended column.')
@@ -7395,14 +7399,14 @@ if _TARGET:
     tc1c.TestClient.DEFAULT_VER = _TARGET
 
 _GROUP_DOC = {
-    'tc_field':    'Actions on a form field, button, group or element addition. Choose `action`.',
-    'tc_table':    'Read and edit table or tree rows, manage selection and expand or collapse nodes. Choose `action`.',
-    'tc_doc':      'Actions on document fields and spreadsheet areas. Choose `action`.',
+    'tc_field':    'Actions on a form field, button, group or element addition.',
+    'tc_table':    'Read and edit table or tree rows, manage selection and expand or collapse nodes.',
+    'tc_doc':      'Actions on document fields and spreadsheet areas.',
     'tc_calendar': 'Actions on type="CalendarField" only. For a regular date input field, '
-                   'use tc_field(action="input_text").',
+                   'use input_text.',
     'tc_window':   'Actions on the client application window.',
     'tc_form':     'Actions on the managed form itself, including navigation between form elements '
-                   'and reading the focused element. Choose `action`.',
+                   'and reading the focused element.',
     'tc_find':     'Search the UI tree for objects.',
     'tc_session':  'Connect to, launch or stop the 1C test client.',
     'tc_scenario': 'Record and replay UI scenarios.',
@@ -7416,8 +7420,7 @@ _ACTION_GROUP = {a: g for g, acts in _ACTIONS.items() for a in acts}
 _COMMON_ACTIONS = ('is_visible', 'is_enabled', 'get_context_menu', 'get_parent')
 
 
-_PARAM_NOTE = ('\n* marks a required action parameter; the group schema treats action parameters '
-               'as optional. Pass action="name" and only that action\'s parameters.')
+_PARAM_NOTE = '\n* marks a required parameter. Pass only the parameters of the action.'
 
 _EFFECT_NOTE = ('\nok=true means accepted; verify effects by reading state. target_check: present, '
                 'unknown (uncheckable), off (disabled); present does not prove an effect. '
@@ -7437,8 +7440,7 @@ def _common_hint(group, acts, published):
     следование указателю упиралось бы в ошибку схемы."""
     if not any('key' in inspect.signature(fn).parameters for fn in acts.values()):
         return ''                                  # группа не работает с объектами по адресу
-    other = ['%s(action="%s")' % (published[a], a) for a in _COMMON_ACTIONS
-             if published.get(a) and published[a] != group]
+    other = [a for a in _COMMON_ACTIONS if published.get(a) and published[a] != group]
     return ('\nAlso available: %s.' % ', '.join(other)
             if other else '')
 
@@ -7472,11 +7474,11 @@ _ADDRESS_NOTES = {
     },
     'get_child_objects': {
         'id': 'Address the parent with ref; children contain ref values. '
-              'For a whole subtree, pass root_ref to tc_find(action="find_objects").',
+              'For a whole subtree, pass root_ref to find_objects.',
         **dict.fromkeys(('prefix', 'off'),
             'Address the parent with key; children contain key and handle. '
             'Use the pair from the same object for subsequent actions that require both. '
-            'For a whole subtree, pass root_key to tc_find(action="find_objects").'),
+            'For a whole subtree, pass root_key to find_objects.'),
     },
     'get_parent': {
         'id': 'Address the element with ref; objects in parent contain their own ref values.',
@@ -7503,10 +7505,9 @@ def _fmt_action(name, fn):
         doc = doc.replace('{ref, handle}', '{ref}')
     if name in _ADDRESS_NOTES:
         doc += '\n' + _ADDRESS_NOTES[name][_address_mode()]
-    # ссылки на прежние имена инструментов -> пары «группа + действие»
+    # имена обработчиков tc_<действие> в документации -> имена действий
     doc = re.sub(r'\btc_([a-z_]+)\b',
-                 lambda m: ('%s(action="%s")' % (_ACTION_GROUP[m.group(1)], m.group(1))
-                            if m.group(1) in _ACTION_GROUP else m.group(0)), doc)
+                 lambda m: m.group(1) if m.group(1) in _ACTION_GROUP else m.group(0), doc)
     lines = [l.strip() for l in doc.splitlines() if l.strip()]
     minv = TOOL_MIN_VERSION.get('tc_' + name)
     if minv and _ver_tuple(minv) > (8, 3, 1):
@@ -7735,7 +7736,7 @@ def _dispatch_connected_action_impl(acts, group, kw, connection_id=None):
             message = str(e)
             if _address_mode() == 'id':
                 message = message.replace("'key'", "'ref'").replace("'root_key'", "'root_ref'")
-            raise ValueError('%s(action="%s"): %s' % (group, name, message))
+            raise ValueError('%s: %s' % (name, message))
         bound.apply_defaults()
         res = fn(*bound.args, **bound.kwargs)
         if isinstance(res, _screenshots.Screenshot):
@@ -7761,7 +7762,7 @@ def _dispatch_connected_action_impl(acts, group, kw, connection_id=None):
             res = {'ok': True, 'message': res}
         res = {**res, 'connection_id': connection_id}
         if name in ('set_cell_text', 'get_cell_text') and isinstance(res.get('suggested_call'), dict):
-            res['suggested_call']['arguments']['connection_id'] = connection_id
+            res['suggested_call']['connection_id'] = connection_id
     if name in ('connect', 'launch_client') and _state.get('profile') and isinstance(res, dict):
         res['profile'] = _state['profile']
     res = _profiles.redact(res)
