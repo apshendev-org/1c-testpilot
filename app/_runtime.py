@@ -5764,6 +5764,7 @@ def tc_find_objects(name: str = None, cls: str = None, type: str = None, root_ke
                 'error': 'Use scope=application without a search root, or scope=window with an optional root.'}
     if scope == 'application':
         root_key = _APPLICATION_ROOT
+    cls = _CLASS_ALIASES.get(cls, cls)   # диагностика пустого поиска — по сведённому имени
     seen_c = set() if cls else None
     seen_t = set() if type else None
     objs = _find_wait(c, name, cls, type, root_key, title, timeout,
@@ -5796,6 +5797,7 @@ def tc_find_object(name: str = None, cls: str = None, type: str = None, root_key
                 'error': 'Use scope=application without a search root, or scope=window with an optional root.'}
     if scope == 'application':
         root_key = _APPLICATION_ROOT
+    cls = _CLASS_ALIASES.get(cls, cls)   # диагностика пустого поиска — по сведённому имени
     seen_c = set() if cls else None
     seen_t = set() if type else None
     res = _find_wait(c, name, cls, type, root_key, title, timeout,
