@@ -25,6 +25,26 @@ PRELOADED = RECORDINGS / 'goto-row-preloaded.jsonl'
 CELL_EDIT = RECORDINGS / '01-cell-edit.jsonl'
 NO_WORK_WINDOW = RECORDINGS / '02-no-work-window.jsonl'
 CHOICE_FROM_CELL = RECORDINGS / '03-choice-from-cell.jsonl'
+# Спайк testpilot-helper-restore (spike:spk_cff9b4db89@v3): код через форму Request без активизации Helper.
+RESTORE_ACTIVATE = RECORDINGS / '01-idle-activate.jsonl'        # restore-1: Активизировать() в обработчике ожидания
+RESTORE_LOCK_COPY = RECORDINGS / '02-lock-copy.jsonl'          # restore-2b: закрытие формы с блокировкой окна владельца
+RESTORE_CHILD_REQUEST = RECORDINGS / '03-child-request.jsonl'  # restore-3c: Request открыт кодом Helper (Helper активен)
+RESTORE_CLICK = RECORDINGS / '04-click-without-activate.jsonl'  # restore-4b: кнопка Helper протоколом, дальше публичные действия
+RESTORE_PROTOCOL = RECORDINGS / '05-protocol-only.jsonl'       # restore-4c: весь путь протоколом
+RESTORE_READ_RESULT = RECORDINGS / '06-read-result.jsonl'      # restore-5: ответ из поля неактивного Helper
+RESTORE_MODAL = RECORDINGS / '07-modal.jsonl'                  # restore-6: вопрос и окно ошибки
+RESTORE_OPEN_FORM = RECORDINGS / '08-open-form.jsonl'          # restore-7: код в Request открывает форму
+RESTORE_OWNER_CLOSED = RECORDINGS / '09-owner-closed.jsonl'    # restore-8: код закрыл форму-владельца — до исправления окно ошибки
+RESTORE_LIVE = RECORDINGS / '10-live-check.jsonl'              # restore-8b: живая проверка кода ветки публичными инструментами
+# Прежние пути возврата окна (изменение helper-request-form их закрывает): код Helper активизирует его окно,
+# ACTIVATE и Активизировать() окно не возвращают; обмен файлами через обработчик ожидания владелец отклонил.
+CELL_FIND_ROWS = RECORDINGS / '04-find-rows-focus.jsonl'
+CELL_READ_ROWS = RECORDINGS / '05-read-rows-focus.jsonl'
+CELL_RESTORE_HANDLE = RECORDINGS / '06-restore-with-handle.jsonl'
+CELL_ANY_CODE = RECORDINGS / '07-any-helper-code.jsonl'
+CELL_ACTIVATE_CODE = RECORDINGS / '08-activate-from-code.jsonl'
+IDLE_HALF = RECORDINGS / '01-interval-half.jsonl'
+IDLE_CHOICE = RECORDINGS / '02-choice-from-cell.jsonl'
 
 
 def _indent(line):
@@ -109,6 +129,23 @@ def exchange(path=RECORDING):
 def responses(action, path=RECORDING):
     """Ответы записи для действия runtime (Client.call) в порядке записи, уже с key вместо ref."""
     return [call['response'] for call in exchange(path) if call['action'] == action]
+
+
+def rows(path, kind=None, step=None):
+    """Строки записи спайков cell-edit / helper-restore / helper-idle ({step, t, kind, ...}) с отбором по полям."""
+    out = []
+    for line in Path(path).read_text(encoding='utf-8').splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if kind in (None, row.get('kind')) and step in (None, row.get('step')):
+            out.append(row)
+    return out
+
+
+def window(row):
+    """Ответ get_active_window записи, как его читает runtime (_window): без platform_version и connection_id."""
+    return {k: v for k, v in row['result'].items() if k not in ('platform_version', 'connection_id')}
 
 
 def direct(path, step=None, action=None):

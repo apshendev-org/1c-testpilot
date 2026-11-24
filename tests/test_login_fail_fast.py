@@ -80,6 +80,7 @@ for name, fake in (('win32gui', FakeWin32Gui), ('win32process', FakeWin32Process
     sys.modules.setdefault(name, fake)
 
 import _code_execution  # noqa: E402
+import _forms  # noqa: E402
 import _native_window  # noqa: E402
 import _service_metadata  # noqa: E402  ленивый импорт в discover не должен случиться под патчем os.name (см. recorded_launch)
 import server as R  # noqa: E402
@@ -325,8 +326,14 @@ def test_slow_start_waits_and_succeeds(monkeypatch, tmp_path, fake_time):
     alive = [r['windows'] for r in records('slow-start.jsonl', case='ok', kind='process') if r.get('alive')]
     loading = alive[0]                       # «Загрузка конфигурационной информации...»
     main = next(s for s in alive if any(w['title'] == MAIN_WINDOW_TITLE for w in s))
-    # search_objects записи — проекция перечисленных объектов; handle она не писала, пустой.
+    # search_objects записи — проекция перечисленных объектов; handle она не писала, пустой. Элементов формы Helper
+    # проекция не пишет; discover ищет на ней ClientResult, ServerResult и OpenRequest — состав по разметке обработки
+    # (_forms.py), окно и форма — из записи.
     objects = [dict(o, handle=None) for o in records('slow-start.jsonl', case='ok', kind='search_objects')[0]['objects']]
+    helper_form = next(o for o in objects if o.get('form_name') == 'ВнешняяОбработка.Testpilot.Форма.Helper')
+    assert helper_form['title'] == 'Testpilot: Helper'
+    objects += [dict(key=f"{helper_form['key']}.{kind}[{name}]", name=name, handle=None, **{'class': kind}, type=None,
+                     title=name, form_name=None) for name, kind, _ in _forms.items('Helper')]
     proc, stops, exe = recorded_launch(monkeypatch, tmp_path, spawned['pid'], connected)
     shown = []
 
