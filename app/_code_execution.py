@@ -466,9 +466,9 @@ def _open_request(R, client, service):
         for kind in ('action', 'commit'):
             _checked(client.send_cmd(G.CLICK, button['key'], kind=kind, handle=button['handle']))
     except tc1c.OperationError:
-        raise Failure('modal_window_open', 'A modal window (question, error) blocks the 1C interface; nothing was executed.',
-                      suggested_action='answer_dialog',
-                      message='Answer it with answer_dialog, or read it with get_current_error and close it with close_window, then retry.') from None
+        raise Failure('modal_window_open', 'A modal window (question, error) blocks the 1C interface; nothing was executed. '
+                      'Answer it with answer_dialog, or read it with get_current_error and close it with close_window, then retry.',
+                      suggested_action='answer_dialog') from None
     while True:
         window = R._window(client).get('key')
         # Only a newly active window is read: reading every element of the work form is costly.
