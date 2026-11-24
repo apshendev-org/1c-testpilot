@@ -58,6 +58,7 @@ CAL_MONTH_DATE = bytes.fromhex('f100b073f89b450200')
 _state = _connections.State()
 _pool = _connections.Pool(_state)
 _snapshot_store = _snapshots.Store()
+SW_MAXIMIZE = 3  # ShowWindow: окно клиента 1С при запуске — развёрнутым
 SCREENSHOTS = os.environ.get('TC1C_SCREENSHOTS', 'true').strip().lower() not in ('false', '0', 'no', 'off')
 LOGGING = _call_logging.enabled('TC1C_LOGGING')
 _log_store = _call_logging.Store() if LOGGING else None
@@ -1401,7 +1402,14 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
                 proc = IsolatedProcess(args, deadline=deadline)
             _state['_isolated_process'] = proc
         else:
-            proc = subprocess.Popen(args, creationflags=flags, close_fds=True,
+            startupinfo = None
+            if hasattr(subprocess, 'STARTUPINFO'):  # только Windows
+                # У 1С нет ключа развёрнутого окна; флаг процесса окно разворачивает
+                # (spike: docs/spikes/testpilot-maximized-window), иначе сохранённый размер шире экрана WS.
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = SW_MAXIMIZE
+            proc = subprocess.Popen(args, creationflags=flags, close_fds=True, startupinfo=startupinfo,
                                     start_new_session=os.name != 'nt', stdin=subprocess.DEVNULL,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as e:
