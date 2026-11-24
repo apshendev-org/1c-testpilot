@@ -38,6 +38,17 @@ RESTORE_OWNER_CLOSED = RECORDINGS / '09-owner-closed.jsonl'    # restore-8: ко
 RESTORE_LIVE = RECORDINGS / '10-live-check.jsonl'              # restore-8b: живая проверка кода ветки публичными инструментами
 # Прежние пути возврата окна (изменение helper-request-form их закрывает): код Helper активизирует его окно,
 # ACTIVATE и Активизировать() окно не возвращают; обмен файлами через обработчик ожидания владелец отклонил.
+# Спайк testpilot-ui-feedback (spike:spk_91306bdbfc@v1): MCP-сервер testpilot прежнего кода (v2.24.2), вызовы
+# инструмента → ответ; TC1C_COMPACT_REFS=id, ответ JSON. Запись в off-режиме (recording-off/02b-…) копией не стала:
+# testpilot_copies_match_spike_recordings ищет источник только в recording/.
+UI_SESSION = RECORDINGS / '00-session.jsonl'                    # подключение, list_profiles, launch_client, tools/list
+UI_PROTECTED = RECORDINGS / '01-protected-cell.jsonl'         # защищённая R2C4 против свободной R2C5
+UI_REOPEN = RECORDINGS / '02-ref-after-reopen.jsonl'           # ref кнопки после закрытия и открытия формы
+UI_OPENED = RECORDINGS / '03-current-opened.jsonl'             # current_opened сворачиваемой группы (инвертирован)
+UI_WINDOWS = RECORDINGS / '04-windows-by-title.jsonl'          # две формы с одним заголовком, activate(ref=ManagedForm)
+UI_CYRILLIC = RECORDINGS / '05-cyrillic-parameters.jsonl'      # кириллические ключи parameters execute_code
+UI_OPEN_FORM = RECORDINGS / '06-open-form-while-other-tab-active.jsonl'   # ОткрытьФорму из кода при другой вкладке
+# Прежние пути возврата окна (изменение helper-request-form их закрывает): код Helper активизирует его окно,
 CELL_FIND_ROWS = RECORDINGS / '04-find-rows-focus.jsonl'
 CELL_READ_ROWS = RECORDINGS / '05-read-rows-focus.jsonl'
 CELL_RESTORE_HANDLE = RECORDINGS / '06-restore-with-handle.jsonl'
@@ -155,3 +166,25 @@ def direct(path, step=None, action=None):
     return [dict(step=row['step'], action=row['action'], arguments=row.get('args') or {}, response=row['result'])
             for row in rows if row.get('kind') == 'call'
             and (step is None or row['step'] == step) and (action is None or row['action'] == action)]
+
+
+def ui(path, step=None, action=None):
+    """Вызовы записи спайка ui-feedback (строка {step, t, kind: "call", tool, action, args, result}): {step, tool,
+    action, arguments, response} в порядке записи, с key вместо ref в аргументах и ответе; step и action — отбор."""
+    out = []
+    for line in Path(path).read_text(encoding='utf-8').splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row.get('kind') != 'call' or (step is not None and row['step'] != step) \
+                or (action is not None and row['action'] != action):
+            continue
+        out.append(dict(step=row['step'], tool=row['tool'], action=row['action'],
+                        arguments=_rename_refs(row.get('args') or {}), response=_rename_refs(row['result'])))
+    return out
+
+
+def ui_rows(path, kind=None):
+    """Прочие строки записи спайка ui-feedback ({step, kind: start | found | …, …}) с отбором по kind."""
+    return [row for row in (json.loads(line) for line in Path(path).read_text(encoding='utf-8').splitlines() if line.strip())
+            if kind is None or row.get('kind') == kind]
