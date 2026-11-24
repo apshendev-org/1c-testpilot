@@ -10,7 +10,7 @@
 - [x] 2.1 Форма `Request`: поле `Request`, кнопки `RunClient`/`RunServer`, переменная `Сервис`, «Выполнить» → `Сервис.ВыполнитьЗапросСервиса`, затем закрытие; `ПередЗакрытием` не отказывает
 - [x] 2.2 Helper: команда и кнопка `OpenRequest` (владелец — форма активного окна, иначе Helper; блокировка окна владельца); экспортная `ВыполнитьЗапросСервиса(Текст, Контекст)` из тел `ВыполнитьНаКлиенте`/`ВыполнитьНаСервере`; ответ — в `ClientResult`/`ServerResult`
 - [x] 2.3 Helper: убрать поля `ClientRequest`, `ServerRequest`, кнопки и команды `RunClient`, `RunServer`
-- [ ] 2.4 Пересобрать `app/testpilot_assets/Testpilot.epf` (WS, `dev_ib.py epf-build`)
+- [x] 2.4 Пересобрать `app/testpilot_assets/Testpilot.epf` (WS, `dev_ib.py epf-build`)
 
 ## 3. testpilot (app/_code_execution.py)
 
