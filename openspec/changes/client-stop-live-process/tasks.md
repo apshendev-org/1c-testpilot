@@ -9,4 +9,4 @@
 
 ## 3. Проверка
 
-- [ ] 3.1 `uv run --no-project --with ".[test]" pytest tests -q`, `openspec validate --all --strict` — зелёные
+- [x] 3.1 `uv run --no-project --with ".[test]" pytest tests -q`, `openspec validate --all --strict` — зелёные
