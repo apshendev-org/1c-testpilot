@@ -6,7 +6,7 @@
 - старт без `connect` — 3 (7%): `RuntimeError` без кода и подсказки. Затем `connect(profile)` на профиль запуска — `profile_action_mismatch` (2, 5%), хотя клиент этого профиля уже запущен. Каждая сессия тратит на старт 2–3 лишних хода;
 - пачка проверяет аргументы шага только перед ним, поэтому падает на середине, а хвост теряется.
 
-Спайк: стенограммы — spike:spk_7429445fbc@v1. Ответы testpilot и 1С на новые отказы и подхват запущенного клиента записываются живьём на WS при apply (`docs/spikes/testpilot-execute-errors/recording/` кита, копии в `tests/recordings`), тесты — на этих записях.
+Спайк: стенограммы — spike:spk_7429445fbc@v1. Ответы testpilot и 1С на новые отказы и подхват запущенного клиента записаны живьём на WS — spike:spk_21dac6344d@v1 (`docs/spikes/testpilot-execute-errors/recording/` кита, копии в `tests/recordings`), тесты — на этих записях.
 
 ## What Changes
 

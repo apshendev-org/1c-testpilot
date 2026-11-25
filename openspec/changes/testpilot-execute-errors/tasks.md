@@ -18,8 +18,8 @@
 ## 4. Описание, документация, спайк
 
 - [x] 4.1 Описание `execute` (решение 8); `docs/TOOLS.md` — синонимы, проверка пачки, `not_connected`, `connect(profile)`; `README.md` — подключение; `pyproject.toml` — 2.1.0. Проверка: `uv run --no-project --with ".[test]" pytest tests -q`
-- [ ] 4.2 Спайк `docs/spikes/testpilot-execute-errors/` кита (`bb spike record`): живой прогон на WS в дереве 1c_bgu20 (серверная ИБ) с testpilot из ветки, сырой обмен MCP в `recording/`, копии в `tests/recordings`. Записи: `area`/`address`/`ref`→`root_ref`/`keys` строкой; пачка с ошибкой в шаге 2 (ничего не исполнено); действие без `connect` (`not_connected`); `connect(profile)` к запущенному `client start` клиенту; `choose_from_drop_list`/`choose_row` не для элемента; `get_context` с `ref` поля. Проверка: файлы есть, `spike:<id>@v1` вписан в proposal.md
-- [ ] 4.3 Issue кита на после релиза: скилл `testpilot-testing` — `connect(profile)` больше не отказывает, `not_connected` с `suggested_call`, синонимы (`kit-skills/` в этом изменении не правится). Проверка: номер issue в PR
+- [x] 4.2 Спайк `docs/spikes/testpilot-execute-errors/` кита (`bb spike record`): живой прогон на WS в дереве 1c_bgu20 (серверная ИБ) с testpilot из ветки, сырой обмен MCP в `recording/`, копии в `tests/recordings`. Записи: `area`/`address`/`ref`→`root_ref`/`keys` строкой; пачка с ошибкой в шаге 2 (ничего не исполнено); действие без `connect` (`not_connected`); `connect(profile)` к запущенному `client start` клиенту; `choose_from_drop_list`/`choose_row` не для элемента; `get_context` с `ref` поля. Проверка: файлы есть, `spike:<id>@v1` вписан в proposal.md
+- [x] 4.3 Issue кита на после релиза: скилл `testpilot-testing` — `connect(profile)` больше не отказывает, `not_connected` с `suggested_call`, синонимы (`kit-skills/` в этом изменении не правится). Проверка: номер issue в PR
 
 ## 5. Тесты (поток тестов, на записях 4.2)
 
