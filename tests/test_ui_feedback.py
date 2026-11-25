@@ -1,6 +1,7 @@
 """Обратная связь проекта по testpilot (изменение testpilot-ui-feedback, матрица tasks.md п. 2):
 `cls` именами типов платформы (object-search) и окно запущенного клиента развёрнуто
-(client-launch-cli). Требование action-effects (клик без повтора, группа без ожидания эффекта) —
+(client-launch-cli; изменение testpilot-maximize-optional — разворот только при TC1C_MAXIMIZE_WINDOW=true,
+матрица его tasks.md п. 2). Требование action-effects (клик без повтора, группа без ожидания эффекта) —
 tests/test_effects.py.
 
 Записи (копии в tests/recordings/, байт в байт docs/spikes):
@@ -105,12 +106,9 @@ def test_diagnostics_of_a_missing_alias_name_the_reduced_class(find):
                            'so the object may not have appeared yet'}
 
 
-# ---------------------------------------------------------------- client-launch-cli
+# ------------------------------------------- client-launch-cli (testpilot-maximize-optional)
 STARTF_USESHOWWINDOW = 1   # winbase.h; запись: GetStartupInfo дочернего процесса — dwFlags=1 STARTF_USESHOWWINDOW=True
 SW_MAXIMIZE = 3            # запись: wShowWindow=3 → окно -8,-8 1040x784 IsZoomed=True на экране 1024x768
-SCREEN = (1024, 768)       # запись: PrimaryScreen {X=0,Y=0,Width=1024,Height=768}
-WITHOUT_FLAG = (0, 9, 1438, 759)      # запись, случай 1 (ps-normal): rect=L0 T9 1438x759 IsZoomed=False — шире экрана
-WITH_FLAG = (-8, -8, 1040, 784)       # запись, случаи 4, 6, 10 (py-max): rect=L-8 T-8 1040x784 IsZoomed=True
 
 
 class StartupInfo:
@@ -147,6 +145,7 @@ def launch(monkeypatch, tmp_path):
     for path in exe.values():
         path.write_bytes(b'')
     monkeypatch.setenv('DISPLAY', ':99')
+    monkeypatch.delenv('TC1C_MAXIMIZE_WINDOW', raising=False)     # разворот выключен, пока тест не включит
     monkeypatch.setattr(socket, 'socket', lambda *a, **k: Port())
     monkeypatch.setattr(_code_execution, 'launch_path', lambda *a, **k: None)
     monkeypatch.setattr(R, '_state', {'profile': 'ib'})
@@ -167,42 +166,64 @@ def launch(monkeypatch, tmp_path):
     return launch, launched
 
 
-def test_windows_client_is_launched_maximized(launch, monkeypatch):
-    """«Сохранённый размер шире экрана» (запись спайка): на Windows процесс клиента создаётся с
-    STARTF_USESHOWWINDOW и wShowWindow=SW_MAXIMIZE — теми dwFlags=1, wShowWindow=3, что разворачивают
-    окно (1040x784 на экране 1024x768) вместо сохранённых 1438 px."""
-    assert WITHOUT_FLAG[2] > SCREEN[0] and WITH_FLAG[2] <= SCREEN[0] + 16 and R.SW_MAXIMIZE == SW_MAXIMIZE
-    launch, launched = launch
+def windows(monkeypatch):
+    """Windows для tc_launch_client: os.name='nt' и subprocess.STARTUPINFO (на Linux его нет)."""
     monkeypatch.setattr(os, 'name', 'nt')
     monkeypatch.setattr(subprocess, 'STARTUPINFO', StartupInfo, raising=False)
     monkeypatch.setattr(subprocess, 'STARTF_USESHOWWINDOW', STARTF_USESHOWWINDOW, raising=False)
+
+
+def test_windows_client_is_launched_maximized_when_TC1C_MAXIMIZE_WINDOW_is_true(launch, monkeypatch):
+    """«Сохранённый размер шире экрана» (запись спайка): при TC1C_MAXIMIZE_WINDOW=true на Windows процесс
+    клиента создаётся с STARTF_USESHOWWINDOW и wShowWindow=SW_MAXIMIZE — теми dwFlags=1, wShowWindow=3,
+    что разворачивают окно (1040x784 на экране 1024x768) вместо сохранённых 1438 px."""
+    windows(monkeypatch)
+    monkeypatch.setenv('TC1C_MAXIMIZE_WINDOW', 'true')
+    launch, launched = launch
     result = launch()
     assert result['ok'] and result['pid'] == Process.pid and result['desktop'] == 'default'
     [(args, kwargs)], isolated = launched.popen, launched.isolated
-    assert len(launched.popen) == 1 and isolated == []
+    assert isolated == []
     assert args[0].endswith('1cv8.exe') and args[1] == 'ENTERPRISE' and '/TESTCLIENT' in args
     info = kwargs['startupinfo']
     assert isinstance(info, StartupInfo)
     assert (info.dwFlags, info.wShowWindow) == (STARTF_USESHOWWINDOW, SW_MAXIMIZE)
 
 
-def test_client_without_startupinfo_is_launched_without_the_window_flag(launch, monkeypatch):
-    """«Не Windows»: без subprocess.STARTUPINFO процесс запускается без флага окна."""
+@pytest.mark.parametrize('value', [None, 'false'], ids=['unset', 'false'])
+def test_windows_client_is_launched_without_the_window_flag_by_default(launch, monkeypatch, value):
+    """«Разворот выключен по умолчанию»: TC1C_MAXIMIZE_WINDOW не задан или false — на Windows процесс
+    запускается без флага окна (запись, случай 1 ps-normal: без флага окно приходит в сохранённом размере
+    1438x759, шире экрана 1024x768; развёрнутый клиент блокировал ввод на WS — потому разворот выключен)."""
+    windows(monkeypatch)
+    if value is not None:
+        monkeypatch.setenv('TC1C_MAXIMIZE_WINDOW', value)
     launch, launched = launch
+    result = launch()
+    assert result['ok'] and result['desktop'] == 'default'
+    [(_, kwargs)], isolated = launched.popen, launched.isolated
+    assert isolated == []
+    assert 'startupinfo' in kwargs and kwargs['startupinfo'] is None
+
+
+def test_client_without_startupinfo_is_launched_without_the_window_flag(launch, monkeypatch):
+    """«Не Windows»: без subprocess.STARTUPINFO процесс запускается без флага окна — даже при
+    TC1C_MAXIMIZE_WINDOW=true."""
     monkeypatch.delattr(subprocess, 'STARTUPINFO', raising=False)
+    monkeypatch.setenv('TC1C_MAXIMIZE_WINDOW', 'true')
+    launch, launched = launch
     result = launch()
     assert result['ok']
-    [(args, kwargs)] = launched.popen
+    [(_, kwargs)] = launched.popen
     assert 'startupinfo' in kwargs and kwargs['startupinfo'] is None
 
 
 def test_isolated_desktop_launch_is_unchanged(launch, monkeypatch):
-    """Запуск на изолированном рабочем столе не меняется: IsolatedProcess получает командную строку
-    без флага окна, Popen не вызывается."""
+    """Запуск на изолированном рабочем столе не меняется и при TC1C_MAXIMIZE_WINDOW=true: IsolatedProcess
+    получает командную строку, Popen с флагом окна не вызывается."""
+    windows(monkeypatch)
+    monkeypatch.setenv('TC1C_MAXIMIZE_WINDOW', 'true')
     launch, launched = launch
-    monkeypatch.setattr(os, 'name', 'nt')
-    monkeypatch.setattr(subprocess, 'STARTUPINFO', StartupInfo, raising=False)
-    monkeypatch.setattr(subprocess, 'STARTF_USESHOWWINDOW', STARTF_USESHOWWINDOW, raising=False)
     result = launch(desktop='isolated')
     assert result['ok'] and result['desktop'] == 'isolated'
     [args], popen = launched.isolated, launched.popen

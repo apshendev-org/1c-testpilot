@@ -7,8 +7,8 @@
 
 | Требование | Сценарий | Тест |
 |---|---|---|
-| Окно запущенного клиента развёрнуто | Сохранённый размер шире экрана | |
-| Окно запущенного клиента развёрнуто | Разворот выключен по умолчанию | |
-| Окно запущенного клиента развёрнуто | Не Windows | |
+| Окно запущенного клиента развёрнуто | Сохранённый размер шире экрана | `test_ui_feedback.py::test_windows_client_is_launched_maximized_when_TC1C_MAXIMIZE_WINDOW_is_true`, `::test_isolated_desktop_launch_is_unchanged` (изолированный стол не меняется и при true) |
+| Окно запущенного клиента развёрнуто | Разворот выключен по умолчанию | `test_ui_feedback.py::test_windows_client_is_launched_without_the_window_flag_by_default` (unset, false) |
+| Окно запущенного клиента развёрнуто | Не Windows | `test_ui_feedback.py::test_client_without_startupinfo_is_launched_without_the_window_flag` (при true) |
 
-- [ ] 2.1 тесты по матрице
+- [x] 2.1 тесты по матрице
