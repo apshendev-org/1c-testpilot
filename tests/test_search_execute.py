@@ -297,18 +297,21 @@ async def test_single_call_answers_as_the_former_group_call(server, pool, monkey
 
 async def test_wrong_arguments_are_refused_before_anything_is_sent(server, click, pool, monkeypatch):
     """4.3: лишний аргумент, нет обязательного — invalid_arguments с сигнатурой click до разрешения ссылки
-    и выбора соединения; неизвестное действие — unknown_action с ближайшими именами. Ничего не отправлено."""
+    и выбора соединения; неизвестное действие — unknown_action с ближайшими именами. Ничего не отправлено.
+    С testpilot-execute-errors (сценарий «Лишний аргумент») отказ — на пачку до запуска, со step; did_you_mean
+    (если есть) называет параметр click — подсказки проверяет test_execute_errors."""
     client, _ = pool
     reads(monkeypatch, client)
+    signature = 'click(ref, answer=null, expect=null, timeout=10, diagnostics=False, diagnostics_wait=2.0)'
     extra = await execute([{'action': 'click', 'args': {'ref': 'e1a26d020552e-c', 'text': 'X'}}])
-    assert extra == {'ok': False, 'stopped_at': 0, 'steps': [{
-        'ok': False, 'code': 'invalid_arguments',
-        'error': 'Use only the parameters of the selected action; supply all required parameters.',
-        'unexpected_parameters': ['text'], 'missing_parameters': [],
-        'signature': 'click(ref, answer=null, expect=null, timeout=10, diagnostics=False, diagnostics_wait=2.0)'}]}
+    assert {k: v for k, v in extra.items() if k != 'did_you_mean'} == {
+        'ok': False, 'code': 'invalid_arguments', 'step': 0,
+        'error': 'Use only the parameters of the selected action; supply all required parameters. Nothing was executed.',
+        'unexpected_parameters': ['text'], 'missing_parameters': [], 'signature': signature}
+    assert set(extra.get('did_you_mean', {}).values()) <= {'ref', 'answer', 'expect', 'timeout', 'diagnostics', 'diagnostics_wait'}
     missing = await execute([{'action': 'click', 'args': {}}])
-    assert missing['steps'][0]['unexpected_parameters'] == [] and missing['steps'][0]['missing_parameters'] == ['ref']
-    assert missing['steps'][0]['signature'].startswith('click(ref')
+    assert missing['unexpected_parameters'] == [] and missing['missing_parameters'] == ['ref']
+    assert missing['signature'].startswith('click(ref') and 'steps' not in missing
     unknown = await execute([{'action': 'list_windows'}])
     assert unknown['ok'] is False and unknown['code'] == 'unknown_action' and unknown['step'] == 0
     assert unknown['similar'] and set(unknown['similar']) <= set(action_enum(
@@ -363,11 +366,11 @@ async def test_reference_to_an_earlier_step_takes_the_found_button_and_dd_keeps_
 
 @pytest.mark.parametrize('reference, complaint', [
     ('$0.objects.5.ref', "no '5' in the response of step 0"),     # сценарий «Пути нет»: найден один элемент
-    ('$1.objects.0.ref', 'step 1 has no response yet'),            # N не меньше текущего шага
 ])
 async def test_unresolved_reference_stops_the_step_without_sending(server, click, pool, monkeypatch, reference, complaint):
-    """4.6, сценарий «Пути нет»: пути нет в ответе шага 0 (или шаг ещё не исполнен) — шаг unresolved_reference,
-    клик не отправлен, пачка остановлена."""
+    """4.6, сценарий «Пути нет»: пути нет в ответе шага 0 — шаг unresolved_reference, клик не отправлен, пачка
+    остановлена. Ссылку на шаг, который ещё не исполнен ($N, N ≥ текущего), с testpilot-execute-errors
+    отказывает проверка пачки до запуска — test_execute_errors (5.1)."""
     client, _ = pool
     reads(monkeypatch, client)
     out = await execute([{'action': 'find_objects', 'args': {'name': 'RunClient'}},

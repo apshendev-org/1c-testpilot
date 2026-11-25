@@ -489,14 +489,17 @@ async def test_goto_next_window_from_a_tab_is_refused(mcp, pool, monkeypatch):
 
 async def test_activate_window_refuses_ref_parameter(mcp, pool):
     """Запись 04, activate_window_with_ref: параметр ref (как у действий с адресом) — invalid_arguments
-    с именем лишнего параметра до выбора соединения; ничего не отправлено."""
+    с именем лишнего параметра до выбора соединения; ничего не отправлено. С testpilot-execute-errors отказ —
+    на всю пачку до запуска (step, «Nothing was executed.», suggested_actions — их проверяет
+    test_execute_errors по записи того спайка), поэтому connection_id записи в ответе нет."""
     mcp()
     out = await execute([{'action': 'activate_window', 'args': {'ref': 'e4b5202213268-22c'}}], pool)
-    step = out['steps'][0]
-    assert out['ok'] is False and step['code'] == 'invalid_arguments' and step['unexpected_parameters'] == ['ref']
-    assert {k: v for k, v in step.items() if k != 'signature'} == {
-        k: v for k, v in answer(one(WINDOWS, 'activate_window_with_ref', 'activate_window')).items() if k != 'signature'}
-    assert step['signature'].startswith('activate_window(title')          # запись: signature была activate_window()
+    recorded = answer(one(WINDOWS, 'activate_window_with_ref', 'activate_window'))
+    assert 'steps' not in out and out['step'] == 0
+    assert {k: out[k] for k in ('ok', 'code', 'unexpected_parameters', 'missing_parameters')} == {
+        k: recorded[k] for k in ('ok', 'code', 'unexpected_parameters', 'missing_parameters')}
+    assert out['error'] == recorded['error'] + ' Nothing was executed.'
+    assert out['signature'].startswith('activate_window(title')          # запись: signature была activate_window()
     assert pool.frames == []
 
 
