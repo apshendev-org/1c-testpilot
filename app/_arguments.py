@@ -61,6 +61,8 @@ def did_you_mean(action, params, unexpected):
     """{лишний: параметр} по синонимам, подсказкам, затем по близости имени."""
     out = {}
     for name in unexpected:
+        if not isinstance(name, str) or not name.isprintable():
+            continue  # ключ ответа: toon_format не берёт в кавычки ключ с '\n' в конце
         guess = SYNONYMS.get(action, {}).get(name) or HINTS.get(action, {}).get(name)
         if callable(guess):
             guess = None

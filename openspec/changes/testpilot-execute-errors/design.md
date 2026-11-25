@@ -30,7 +30,7 @@
 
 ### 2. Подсказки отказа
 
-`did_you_mean` берётся сначала из таблицы синонимов, затем из `difflib.get_close_matches` по параметрам действия (порог 0.6), затем из таблицы подсказок без автозамены: `values` → `fields` (`goto_row`), `text` → `title` (`activate_window`, `find_object`, `find_objects`). Пример текста:
+`did_you_mean` берётся сначала из таблицы синонимов, затем из `difflib.get_close_matches` по параметрам действия (порог 0.6), затем из таблицы подсказок без автозамены: `values` → `fields` (`goto_row`), `text` → `title` (`activate_window`, `find_object`, `find_objects`). Имя с непечатаемыми символами (`not str.isprintable()`) подсказки не получает: `did_you_mean` делает имя ключом, а `toon_format` 0.9.0-beta.1 не берёт в кавычки ключ с `\n` в конце (`VALID_KEY_REGEX` с `$`), и ответ перестаёт читаться. Пример текста:
 
 ```
 ok: false

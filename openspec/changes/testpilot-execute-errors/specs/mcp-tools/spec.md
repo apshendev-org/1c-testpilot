@@ -53,7 +53,7 @@
 - **THEN** отправлено сочетание `["CTRL", "S"]`
 
 ### Requirement: Подсказка в отказе на аргументы
-Отказ `invalid_arguments` на лишний аргумент MUST содержать `did_you_mean: {лишний: параметр}`, если параметр нашёлся по таблице синонимов или по близости имени. Если агент передал `ref` действию без `ref`, отказ MUST содержать `suggested_actions` — до 5 близких по имени действий, которые принимают `ref`.
+Отказ `invalid_arguments` на лишний аргумент MUST содержать `did_you_mean: {лишний: параметр}`, если параметр нашёлся по таблице синонимов или по близости имени; имя с непечатаемыми символами подсказки не получает. Если агент передал `ref` действию без `ref`, отказ MUST содержать `suggested_actions` — до 5 близких по имени действий, которые принимают `ref`.
 
 #### Scenario: Окно по ref
 - **WHEN** шаг `{"action": "activate_window", "args": {"ref": "<окно>"}}`
@@ -62,6 +62,10 @@
 #### Scenario: Похожее имя
 - **WHEN** `goto_row` получает `values`
 - **THEN** отказ `invalid_arguments` содержит `did_you_mean` с параметром `goto_row`
+
+#### Scenario: Имя с переводом строки
+- **WHEN** `set_area_text` получает лишний аргумент `"ref\n"`
+- **THEN** отказ `invalid_arguments` читается как TOON, `unexpected_parameters: ["ref\n"]`, без `did_you_mean`
 
 ### Requirement: Действие без подключения
 Шаг, которому нужен клиент, при отсутствии подключения MUST отвечать `ok: false`, `code: "not_connected"`, без исключения. Если в реестре клиентов жив ровно один клиент, ответ MUST содержать `suggested_call` `{"action": "connect", "args": {"profile": <его профиль>}}`. Несколько живых — список `running` (профиль, порт) без `suggested_call`. Ни одного при настроенных профилях — `suggested_call` `list_profiles`. Сам testpilot MUST NOT подключаться.
