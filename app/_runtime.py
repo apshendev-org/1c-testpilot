@@ -1403,7 +1403,8 @@ def tc_launch_client(base: str, port: int = None, server: bool = False, user: st
             _state['_isolated_process'] = proc
         else:
             startupinfo = None
-            if hasattr(subprocess, 'STARTUPINFO'):  # только Windows
+            # Только по TC1C_MAXIMIZE_WINDOW: развёрнутый клиент блокировал ввод на рабочем столе WS.
+            if hasattr(subprocess, 'STARTUPINFO') and _call_logging.enabled('TC1C_MAXIMIZE_WINDOW', 'false'):
                 # У 1С нет ключа развёрнутого окна; флаг процесса окно разворачивает
                 # (spike: docs/spikes/testpilot-maximized-window), иначе сохранённый размер шире экрана WS.
                 startupinfo = subprocess.STARTUPINFO()
