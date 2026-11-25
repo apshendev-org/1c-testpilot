@@ -25,18 +25,18 @@
 
 Матрица для потока тестов: требования `specs/mcp-tools/spec.md` и `specs/client-profiles/spec.md` изменения. Разбор аргументов (синонимы, `keys`, подсказки, проверка пачки) — fuzzing по правилу кита: `random.Random(seed)`, 200 входов с шумом (управляющие последовательности, CRLF, обрыв, Юникод), зерно в тексте падения; без исключений и без значений, которых нет во входе.
 
-- [ ] 5.1 Пачка с ошибкой аргументов в шаге 2 (нет обязательного, лишний, неверный тип литерала, `$N` вперёд) — отказ со `step`, ни один шаг не исполнен, в 1С ничего не отправлено; `$0.x` в обязательном аргументе — проверка проходит, тип проверяется после подстановки
-- [ ] 5.2 Синонимы по таблице design (решение 1): каждый синоним каждого действия даёт канонический параметр и `renamed`; `address` у `read_document`/`find_text` по `:`; синоним вместе с каноническим — `invalid_arguments` с `did_you_mean`
-- [ ] 5.3 `send_keys` с `keys` строкой отправляет то же сочетание, что списком (по записи)
-- [ ] 5.4 `did_you_mean` (`goto_row` + `values`, синоним при каноническом) и `suggested_actions` (`activate_window` + `ref` → есть `activate`); fuzzing имён аргументов: подсказка — только существующий параметр действия
-- [ ] 5.5 `not_connected`: один живой клиент — `suggested_call` connect(profile), и этот вызов проходит через `execute` без правки; два — `running` без `suggested_call`; ни одного — `list_profiles`; testpilot не подключается сам
-- [ ] 5.6 `connect(profile)`: живой клиент профиля (по записи) — `reused: true`, `profile`; клиент профиля той же базы и пользователя — подключение к нему; ни одного — `profile_action_mismatch` с `suggested_call` `launch_client`, процесс не запущен; два — `client_ambiguous`; с `port` — только этот порт
-- [ ] 5.7 `search(query="choose_row")` — `Applies to: Table`; таблица применимости совпадает со столбцом «Применим к типам» `docs/TOOLS.md` для каждого действия; описания `search`/`execute` вместе ≤ 8000 символов
-- [ ] 5.8 Отказ `unsupported_receiver`/`unsupported_element_type` по записи — `element_class`, `applies_to`, `suggested_actions` (до 5, без вызванного, все применимы к классу)
-- [ ] 5.9 `get_context(ref=<поле>)` по записи — контекст формы поля и `form_ref`; элемент вне формы — `unsupported_receiver` с `suggested_actions`
+- [x] 5.1 Пачка с ошибкой аргументов в шаге 2 (нет обязательного, лишний, неверный тип литерала, `$N` вперёд) — отказ со `step`, ни один шаг не исполнен, в 1С ничего не отправлено; `$0.x` в обязательном аргументе — проверка проходит, тип проверяется после подстановки
+- [x] 5.2 Синонимы по таблице design (решение 1): каждый синоним каждого действия даёт канонический параметр и `renamed`; `address` у `read_document`/`find_text` по `:`; синоним вместе с каноническим — `invalid_arguments` с `did_you_mean`
+- [x] 5.3 `send_keys` с `keys` строкой отправляет то же сочетание, что списком (по записи)
+- [x] 5.4 `did_you_mean` (`goto_row` + `values`, синоним при каноническом) и `suggested_actions` (`activate_window` + `ref` → есть `activate`); fuzzing имён аргументов: подсказка — только существующий параметр действия
+- [x] 5.5 `not_connected`: один живой клиент — `suggested_call` connect(profile), и этот вызов проходит через `execute` без правки; два — `running` без `suggested_call`; ни одного — `list_profiles`; testpilot не подключается сам
+- [x] 5.6 `connect(profile)`: живой клиент профиля (по записи) — `reused: true`, `profile`; клиент профиля той же базы и пользователя — подключение к нему; ни одного — `profile_action_mismatch` с `suggested_call` `launch_client`, процесс не запущен; два — `client_ambiguous`; с `port` — только этот порт
+- [x] 5.7 `search(query="choose_row")` — `Applies to: Table`; таблица применимости совпадает со столбцом «Применим к типам» `docs/TOOLS.md` для каждого действия; описания `search`/`execute` вместе ≤ 8000 символов
+- [x] 5.8 Отказ `unsupported_receiver`/`unsupported_element_type` по записи — `element_class`, `applies_to`, `suggested_actions` (до 5, без вызванного, все применимы к классу)
+- [x] 5.9 `get_context(ref=<поле>)` по записи — контекст формы поля и `form_ref`; элемент вне формы — `unsupported_receiver` с `suggested_actions`
 
 ## 6. Проверки и выпуск
 
-- [ ] 6.1 `(cd testpilot && uv run --no-project --with ".[test]" pytest tests -q)`, `uv run python -m unittest discover -s payload/tests`, `uv run python -m unittest discover -s testmanager/tests`, `openspec validate --all --strict` в корне кита и в `testpilot/`, `uv run python ci/test_authorship.py origin/master` — код 0
-- [ ] 6.2 Живая проверка ветки на WS (сценарии 4.2 на итоговом коде); после прогона — `remote_ws.py down`, временное дерево 1c_bgu20 и его ветка удалены, процессов 1С и окон на WS нет
-- [ ] 6.3 `/opsx:archive` в ветке; PR `Closes #187` с напоминанием о `git subtree push --prefix testpilot … fork` после слияния
+- [x] 6.1 `(cd testpilot && uv run --no-project --with ".[test]" pytest tests -q)`, `uv run python -m unittest discover -s payload/tests`, `uv run python -m unittest discover -s testmanager/tests`, `openspec validate --all --strict` в корне кита и в `testpilot/`, `uv run python ci/test_authorship.py origin/master` — код 0
+- [x] 6.2 Живая проверка ветки на WS (сценарии 4.2 на итоговом коде); после прогона — `remote_ws.py down`, временное дерево 1c_bgu20 и его ветка удалены, процессов 1С и окон на WS нет
+- [x] 6.3 `/opsx:archive` в ветке; PR `Closes #187` с напоминанием о `git subtree push --prefix testpilot … fork` после слияния
