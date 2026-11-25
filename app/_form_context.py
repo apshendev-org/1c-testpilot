@@ -156,6 +156,10 @@ def run(S, key=None, save_as_snapshot=False, include_tables=False, max_rows=500,
         window = S._window(c)
         if not window.get('key'):
             return dict(ok=False, code='active_window_unavailable', error='The active form cannot be read.')
+        # ref элемента — контекст его формы: агенты передают ref поля вместо формы.
+        owner = S._owning_form(key) if key is not None and S._key_class(key) != 'ManagedForm' else None
+        if owner is not None:
+            key = owner
         form = snapshots.form_object(S, c, key)
         if S._collection_parent(form['key']) != window['key']:
             return dict(ok=False, code='inactive_form', error='Activate this form before reading its current context.')
@@ -203,6 +207,8 @@ def run(S, key=None, save_as_snapshot=False, include_tables=False, max_rows=500,
                          address_mode=S._address_mode())
         result = _context_changes.present(S, c, result, signature, result_mode)
         result['seconds'] = round(time.perf_counter() - start, 4)
+        if owner is not None:
+            result['_element_form'] = True      # _runtime подставит form_ref после публикации ссылок
         return result
     except snapshots.Failure as exc:
         code = exc.code.replace('snapshot_', 'context_')

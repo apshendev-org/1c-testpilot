@@ -32,6 +32,8 @@ import _call_logging
 import _profiles
 import _code_execution
 import _client_shutdown
+import _arguments
+import _applicability
 # Минимальная версия платформы 1С: по инструменту и по GUID метода (для воспроизведения
 # сценариев, где метод известен только по GUID).
 try:
@@ -290,7 +292,7 @@ def _need():
     вызывающего инструмента (TOOL_MIN_VERSION): старому клиенту нельзя слать неизвестный
     GUID — он не отвечает, и вызов висит до таймаута сокета."""
     if not _state['client']:
-        raise RuntimeError('not connected — call connect first')
+        raise _connections.NotConnected()
     c = _state['client']
     action = sys._getframe(1).f_code.co_name
     minv = TOOL_MIN_VERSION.get(action)
@@ -1235,7 +1237,8 @@ def _mismatched_version(error, sent):
 @_action('tc_session')
 def tc_connect(port: int, host: str = '127.0.0.1', version: str = None) -> str:
     """Connect to a running /TESTCLIENT -TPort client using port or a list_profiles profile; explicit
-    parameters override the profile. version must match the full running version (omitted: built-in
+    parameters override the profile. A launch profile connects only to its single running client
+    (same base, server and user; reused=true) and never starts one. version must match the full running version (omitted: built-in
     default, then the version named by a version-mismatch refusal). Connect before UI actions.
     A new host/port creates a connection; the same host/port reconnects that client: connection_id is retained, but find elements again."""
     host, port = _connections.endpoint(host, port)
@@ -7574,10 +7577,31 @@ def _action_argument_error(fn, kw):
     signature = ', '.join(p.name if p.default is inspect.Parameter.empty else
                           p.name + '=' + ('null' if p.default is None else repr(p.default))
                           for p in params.values())
-    return dict(ok=False, code='invalid_arguments',
-                error='Use only the parameters of the selected action; supply all required parameters.',
-                unexpected_parameters=unexpected, missing_parameters=missing,
-                signature=f'{fn.__name__[3:]}({signature})')
+    action = fn.__name__[3:]
+    result = dict(ok=False, code='invalid_arguments',
+                  error='Use only the parameters of the selected action; supply all required parameters.',
+                  unexpected_parameters=unexpected, missing_parameters=missing,
+                  signature=f'{action}({signature})')
+    hint = _arguments.did_you_mean(action, params, unexpected)
+    if hint:
+        result['did_you_mean'] = hint
+    if {'ref', 'key'} & set(unexpected) and not {'ref', 'key'} & params.keys():
+        similar = _arguments.ref_actions(action, _ref_actions())
+        if similar:
+            result['suggested_actions'] = similar
+    return result
+
+
+def _published_actions():
+    """Имена действий схемы execute; без MCP (Python API) — все действия."""
+    names = getattr(getattr(sys.modules[__name__], 'mcp', None), 'execute_names', None)
+    return names if names is not None else sorted(_ACTION_GROUP)
+
+
+def _ref_actions():
+    """Опубликованные действия, которые адресуют элемент (ref / key)."""
+    return [a for a in _published_actions()
+            if a in _ACTION_GROUP and 'key' in inspect.signature(_ACTIONS[_ACTION_GROUP[a]][a]).parameters]
 
 
 def _resolve_ref_arguments(fn, kw):
@@ -7617,6 +7641,31 @@ def _resolve_ref_arguments(fn, kw):
         if internal == 'key' and 'handle' in params:
             out['handle'] = handle
     return out
+
+
+def _with_applicable_actions(res, action, key):
+    """Отказ «действие не для этого элемента»: класс элемента, к чему применимо действие и что подходит."""
+    element_class = _key_class(key) if isinstance(key, str) else ''
+    if not element_class:
+        return res
+    out = dict(res, element_class=element_class)
+    applies = _applicability.classes(action)
+    if applies:
+        out['applies_to'] = applies
+    suggested = _applicability.suggest(action, element_class, _published_actions(), _ACTION_GROUP)
+    if suggested:
+        out['suggested_actions'] = suggested
+    return out
+
+
+def _owning_form(key):
+    """Ключ ближайшей управляемой формы-предка элемента или None."""
+    parent = _collection_parent(key)
+    while parent:
+        if _key_class(parent) == 'ManagedForm':
+            return parent
+        parent = _collection_parent(parent)
+    return None
 
 
 def _collection_parent(key):
@@ -7791,6 +7840,8 @@ def _dispatch_connected_action_impl(acts, group, kw, connection_id=None):
             return _deliver(_screenshots.Screenshot(res.png, metadata))
         if _address_mode() == 'id' and _state.get('client') is not None:
             res = _refs.present(res, name, _refs.for_client(_state['client']))
+        if isinstance(res, dict) and res.pop('_element_form', False) and isinstance(res.get('form'), dict):
+            res['form_ref'] = res['form'].get('ref', res['form'].get('key'))
     except _refs.RefError as exc:
         res = {'ok': False, 'code': exc.code, 'error': str(exc)}
     except _batches.Failure as exc:
@@ -7801,6 +7852,8 @@ def _dispatch_connected_action_impl(acts, group, kw, connection_id=None):
         res = exc.result()
         if _address_mode() == 'id':
             res.pop('target', None)
+    if isinstance(res, dict) and res.get('code') in ('unsupported_element_type', 'unsupported_receiver'):
+        res = _with_applicable_actions(res, name, kw.get('key'))
     if connection_id is not None:
         if not isinstance(res, dict):
             res = {'ok': True, 'message': res}
@@ -7809,6 +7862,8 @@ def _dispatch_connected_action_impl(acts, group, kw, connection_id=None):
             res['suggested_call']['connection_id'] = connection_id
     if name in ('connect', 'launch_client') and _state.get('profile') and isinstance(res, dict):
         res['profile'] = _state['profile']
+    if name == 'connect' and _state.pop('_connect_reused', False) and isinstance(res, dict) and res.get('ok') is not False:
+        res['reused'] = True
     res = _profiles.redact(res)
     _call_logging.observe(res)
     if scenario:
@@ -7835,6 +7890,73 @@ def _dispatch_connected_action_impl(acts, group, kw, connection_id=None):
     return _deliver(res, addrs=('tc_' + name) in _response.ADDR_TOOLS)
 
 
+def _running_clients():
+    """[{profile, port}] живых клиентов реестра .testpilot-clients.json; None — профили не настроены."""
+    registry = _profiles.registry_file()
+    if registry is None:
+        return None
+    try:
+        known = _profiles.load()[0]
+    except _profiles.ProfileError:
+        known = None
+    return [{'profile': name, 'port': entry.get('port')}
+            for name, entry in sorted(_client_registry.read(registry).items())
+            if isinstance(entry, dict) and (known is None or name in known) and _client_registry.alive(entry)]
+
+
+def _not_connected_hint():
+    """Текст и следующий вызов для not_connected. Сам testpilot не подключается."""
+    running = _running_clients()
+    prefix = 'No connected test client; nothing was sent. '
+    if running is None:
+        return {'error': prefix + 'Use connect(port) or launch_client.'}
+    if len(running) == 1:
+        return {'error': prefix + 'Run suggested_call, then repeat this step.',
+                'suggested_call': {'action': 'connect', 'args': {'profile': running[0]['profile']}}}
+    if running:
+        return {'error': prefix + 'Several clients are running; connect with one of their profiles.',
+                'running': running}
+    return {'error': prefix + 'No client is running; launch_client(profile) starts one.',
+            'suggested_call': {'action': 'list_profiles', 'args': {}}}
+
+
+def _connect_running(args):
+    """connect(profile) с профилем запуска -> (аргументы connect, профиль клиента).
+
+    Подходит живой клиент реестра этого профиля или профиля той же базы, сервера и пользователя;
+    с port — только на этом порту. Ровно один — подключение к нему, иначе отказ: connect сам
+    ничего не запускает и между клиентами не выбирает. Профиль подключения не запускается
+    (нет base) — аргументы без изменений, их проверит _profiles.resolve."""
+    name = args['profile']
+    if not isinstance(name, str):
+        return args, None
+    profiles, path = _profiles.load()
+    config = profiles.get(name) if path is not None else None
+    if not isinstance(config, dict) or 'base' not in config:
+        return args, None
+    registry = _profiles.registry_file()
+    port = args.get('port')
+    matches = []
+    for other in _profiles.find(config.get('user'), name):
+        entry = _client_registry.live(registry, other)
+        if entry is not None and (port is None or entry.get('port') == port):
+            matches.append((other, entry))
+    if not matches:
+        raise _profiles.ProfileError('profile_action_mismatch',
+            'No running client of this profile; launch_client starts or reuses one.',
+            suggested_call={'action': 'launch_client', 'args': {'profile': name}})
+    if len(matches) > 1:
+        raise _profiles.ProfileError('client_ambiguous',
+            'Several running clients fit this profile; pass port or another profile.',
+            running=[{'profile': other, 'port': entry.get('port')} for other, entry in matches])
+    other, entry = matches[0]
+    out = {'port': entry['port'], 'host': '127.0.0.1'}
+    version = args.get('version') or entry.get('version') or profiles[other].get('version')
+    if version:
+        out['version'] = version
+    return out, other
+
+
 def _finish_forced_disconnect(connection, pool=None):
     try:
         tc_disconnect()
@@ -7852,6 +7974,7 @@ def _dispatch_action(acts, group, kw):
     connection_id = kw.pop('connection_id', None)
     connection = None
     profile = None
+    running_profile = None
     helper_epf = None
     password_token = None
     machine_lock = None
@@ -7878,7 +8001,12 @@ def _dispatch_action(acts, group, kw):
             args = {k: v for k, v in kw.items() if k != 'action' and v is not None}
             if 'code_epf' in args and (_execution.get() is None or name != 'launch_client'):
                 raise _profiles.ProfileError('profile_only_setting', 'The processing path is set in the server settings or a launch profile.')
+            running_profile = None
+            if name == 'connect' and args.get('profile') is not None:
+                args, running_profile = _connect_running(args)
             args, profile = _profiles.resolve(name, args)
+            if running_profile is not None:
+                profile = running_profile
             helper_epf = args.pop('code_epf', None)
             port_range = args.pop('port_range', None) if name == 'launch_client' else None
             registry = _profiles.registry_file() if profile is not None and name == 'launch_client' else None
@@ -7928,6 +8056,8 @@ def _dispatch_action(acts, group, kw):
             previous_client = _state.get('client')
             if profile is not None:
                 _state['profile'] = profile
+            if name == 'connect' and running_profile is not None:
+                _state['_connect_reused'] = True
             try:
                 return _dispatch_connected_action(acts, group, kw, connection.id if connection else None)
             except Exception as exc:
@@ -7944,6 +8074,8 @@ def _dispatch_action(acts, group, kw):
         result = {'ok': False, 'code': exc.code, 'error': str(exc), **getattr(exc, 'details', {})}
         if exc.code in ('connection_required', 'connection_not_found', 'not_connected'):
             result['connections'] = _connection_pool().list()
+        if isinstance(exc, _connections.NotConnected):
+            result.update(_not_connected_hint())
         return _deliver(_profiles.redact(result))
     finally:
         if machine_lock is not None:

@@ -18,6 +18,12 @@ class ConnectionError(ValueError):
         self.details = details
 
 
+class NotConnected(ConnectionError, RuntimeError):
+    """Нет подключённого клиента. RuntimeError — для прежних обработчиков отказа «not connected»."""
+    def __init__(self, message='No connected test client; nothing was sent.', **details):
+        super().__init__('not_connected', message, **details)
+
+
 def empty_state():
     return {'client': None, 'window_key': None, 'launched_pid': None}
 
@@ -186,7 +192,7 @@ class Pool:
             if len(choices) > 1:
                 raise ConnectionError('connection_required', 'Several connections are available. Supply connection_id or an element ref.')
             if self.entries:
-                raise ConnectionError('not_connected', 'No connected test client. Use connect or list_connections.')
+                raise NotConnected()
             return None
 
     @contextmanager

@@ -234,6 +234,13 @@ codex mcp add 1c-testpilot --url http://127.0.0.1:6004/mcp
 подключается к работающему.
 Явно переданные параметры переопределяют профиль. Имя использованного профиля видно в `list_connections`.
 
+`connect(profile=…)` с профилем запуска не запускает клиент, а подключается к уже запущенному
+(`launch_client` или `client start`), если такой клиент ровно один: этого профиля или профиля той же
+базы, сервера и пользователя, а с `port` — на этом порту. Ответ — `reused: true` и профиль клиента.
+Нет клиента — `profile_action_mismatch` с `suggested_call` `launch_client(profile)`; несколько —
+`client_ambiguous` со списком `running`. Действие без подключения отвечает `not_connected`;
+если жив ровно один клиент из `.testpilot-clients.json`, в ответе `suggested_call` с `connect(profile)`.
+
 Для запуска профиль содержит `base` и параметры `launch_client`, для подключения — `port`
 и необязательные `host`, `version`. Для серверной базы укажите `server: true` и `base: 'server1c\Trade'`.
 `description` задаёт описание. Пароль — строка в `password`

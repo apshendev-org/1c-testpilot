@@ -135,7 +135,7 @@ def register(S):
     def action_doc(action):
         group = pub_group[action]
         fn = published[group][action]
-        return '%s%s%s%s' % (S._fmt_action(action, fn), S._PARAM_NOTE,
+        return '%s%s%s%s%s' % (S._fmt_action(action, fn), S._applicability.line(action), S._PARAM_NOTE,
                              S._EFFECT_NOTE if action in S._VERIFY_ACTIONS else '',
                              S._common_hint(group, {action: fn}, pub_group))
 
@@ -173,14 +173,21 @@ def register(S):
             text += '\n\nAlso matching: %s.' % ', '.join(found[SEARCH_DOCS:])
         return text
 
-    def type_error(action, args):
-        """Типы аргументов — как прежняя схема группы: pydantic, нестрогий режим."""
+    def params_of(action):
+        return {p.name for p in S._public_parameters(published[pub_group[action]][action])}
+
+    def type_error(action, args, *, literal_only=False):
+        """(аргументы, отказ или None, renamed): синонимы, затем имена, затем типы — pydantic, нестрогий режим.
+
+        literal_only — проверка пачки до запуска: значение со ссылкой `$N.путь` считается
+        переданным, его тип проверяется после подстановки."""
         fn = published[pub_group[action]][action]
+        args, renamed = S._arguments.normalize(action, params_of(action), args)
         # Имена — до разрешения ссылок и выбора соединения: лишний аргумент не должен дойти до 1С.
         # code_epf у connect/launch_client отклоняет _dispatch_action своим сообщением.
         names_error = S._action_argument_error(fn, {k: v for k, v in args.items() if k != 'code_epf'})
         if names_error:
-            return args, names_error
+            return args, names_error, renamed
         if action not in adapters:
             adapters[action] = {p.name: pydantic.TypeAdapter(p.annotation) for p in S._public_parameters(fn)
                                 if p.annotation is not inspect.Parameter.empty and p.kind not in
@@ -188,16 +195,16 @@ def register(S):
         out, errors = dict(args), []
         for name, value in args.items():
             adapter = adapters[action].get(name)
-            if adapter is None or value is None:
+            if adapter is None or value is None or (literal_only and has_reference(value)):
                 continue
             try:
-                out[name] = adapter.validate_python(value)
+                out[name] = adapter.validate_python(unescape(value) if literal_only else value)
             except pydantic.ValidationError as exc:
                 errors.append('%s: %s' % (name, '; '.join(e['msg'] for e in exc.errors())))
         if not errors:
-            return out, None
+            return out, None, renamed
         return out, {'ok': False, 'code': 'invalid_arguments', 'error': 'Wrong argument types: ' + ', '.join(errors) + '.',
-                     'signature': S._fmt_action(action, fn).splitlines()[0][2:]}
+                     'signature': S._fmt_action(action, fn).splitlines()[0][2:]}, renamed
 
     def check(calls):
         if not 1 <= len(calls) <= MAX_CALLS:
@@ -216,6 +223,16 @@ def register(S):
                 return {'ok': False, 'code': 'unknown_action', 'step': i,
                         'error': 'Unknown action %r; nothing was executed. search() lists actions.' % action,
                         'similar': difflib.get_close_matches(str(action), names, 5, 0.5)}
+        # Аргументы всех шагов — до первого шага: иначе пачка исполнится наполовину.
+        for i, call in enumerate(calls):
+            args = call.get('args') or {}
+            ahead = forward_reference(args, i)
+            if ahead is not None:
+                return {'ok': False, 'code': 'unresolved_reference', 'step': i,
+                        'error': '%s: step %d has no response yet; nothing was executed.' % (ahead, i)}
+            _, error, _ = type_error(call['action'], args, literal_only=True)
+            if error:
+                return {**error, 'step': i, 'error': error['error'] + ' Nothing was executed.'}
         return None
 
     def run(calls):
@@ -224,8 +241,9 @@ def register(S):
         try:
             for i, call in enumerate(calls):
                 action = call['action']
+                renamed = None
                 try:
-                    args, error = type_error(action, resolve(call.get('args') or {}, steps, i))
+                    args, error, renamed = type_error(action, resolve(call.get('args') or {}, steps, i))
                     result = error or S._dispatch_action(published[pub_group[action]], pub_group[action],
                         {'action': action, 'connection_id': call.get('connection_id'), **args})
                 except Unresolved as exc:
@@ -235,6 +253,8 @@ def register(S):
                 if isinstance(result, _screenshots.Screenshot):
                     images.append(result.png)
                     result = {**result.metadata, 'image': len(images) - 1}
+                if renamed and isinstance(result, dict):
+                    result = {**result, 'renamed': renamed}
                 steps.append(result)
                 if isinstance(result, dict) and result.get('ok') is False:
                     stopped = i
@@ -262,6 +282,40 @@ def register(S):
 
 class Unresolved(Exception):
     pass
+
+
+def _strings(value):
+    if isinstance(value, dict):
+        for v in value.values():
+            yield from _strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _strings(v)
+    elif isinstance(value, str):
+        yield value
+
+
+def has_reference(value):
+    """Есть ли в значении строка `$N.путь`: её тип известен только после подстановки."""
+    return any(STEP_REF.match(s) for s in _strings(value))
+
+
+def forward_reference(value, current):
+    """Первая ссылка `$N.путь` на шаг N >= current или None."""
+    for s in _strings(value):
+        match = STEP_REF.match(s)
+        if match and int(match[1]) >= current:
+            return s
+    return None
+
+
+def unescape(value):
+    """`$$…` -> `$…`, как при подстановке, без ответов шагов."""
+    if isinstance(value, dict):
+        return {k: unescape(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [unescape(v) for v in value]
+    return value[1:] if isinstance(value, str) and value.startswith('$$') else value
 
 
 def resolve(value, steps, current):
@@ -315,7 +369,9 @@ def execute_doc(S):
     doc = ('Run 1C test-client actions in order: calls=[{action, args, connection_id}], 1-%d calls. '
            'The batch stops at the first step with ok=false or an error; the answer is {ok, stopped_at, steps}. '
            'Parameters and documentation of an action: search(query="<action>"); wrong names or types are '
-           'refused before anything is sent, with the signature.\n'
+           'refused before anything is sent, with the signature; all calls are checked before the first runs. '
+           'Known synonyms (area/address/start_address/cell/range, ref for root_ref) are accepted and reported '
+           'as renamed. Without a connection a step answers not_connected with suggested_call.\n'
            'A string argument "$N.path" takes a value from the response of step N of this batch '
            '(keys and list indexes by dots: "$0.object.ref"); start a literal "$" with "$$".\n' % MAX_CALLS)
     if S._response.REF_MODE == 'id':

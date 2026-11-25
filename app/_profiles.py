@@ -15,9 +15,10 @@ CONNECT = {'host', 'port', 'version'}
 
 
 class ProfileError(ValueError):
-    def __init__(self, code, message):
+    def __init__(self, code, message, **details):
         super().__init__(message)
         self.code = code
+        self.details = details
 
 
 class Loader(yaml.SafeLoader):

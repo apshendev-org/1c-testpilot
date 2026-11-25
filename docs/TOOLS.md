@@ -20,9 +20,38 @@
 
 Общий необязательный параметр вызова — `connection_id`. `ref` определяет подключение автоматически; при нескольких клиентах без `ref` нужно указать `connection_id`. Список клиентов — `list_connections`.
 
-Лишние и пропущенные параметры действия, неверные типы возвращаются как `invalid_arguments` с
-правильной сигнатурой; команда при таком отказе в 1С не отправляется. Неизвестное действие —
-`unknown_action` с похожими именами, пачка не исполняется.
+Аргументы всех шагов пачки проверяются до первого шага. Лишние и пропущенные параметры, неверные
+типы — `invalid_arguments` с номером шага `step` и правильной сигнатурой; ни один шаг не исполнен,
+в 1С ничего не отправлено. Неизвестное действие — `unknown_action` с похожими именами. Значение
+`$N.путь` считается переданным, его тип проверяется после подстановки; ссылка на шаг `N` не раньше
+текущего — `unresolved_reference` до запуска.
+
+В отказе на лишний параметр `did_you_mean` называет параметр действия (`{"values": "fields"}`), а если
+действию без `ref` передан `ref` — `suggested_actions` перечисляет похожие действия с `ref`
+(`activate_window` → `activate`).
+
+Синонимы параметров принимаются, если у действия нет параметра с таким именем, а сам параметр не передан;
+ответ шага называет замену: `renamed: {"area": "address"}`.
+
+| Действия | Параметр | Синонимы |
+|---|---|---|
+| `set_current_area`, `set_area_text`, `included_in_merged_area` | `address` | `area`, `cell` |
+| `get_area_text`, `get_current_area_text`, `text_within_area_bounds` | `area` | `address`, `range` |
+| `read_document`, `find_text` | `area` | `range`; `address` со значением с `:` |
+| `read_document`, `find_text` | `start_address` | `cell`; `address` без `:` |
+| `find_objects`, `find_object` | `root_ref` | `ref` |
+
+`keys` у `send_keys` можно передать строкой: `"CTRL+S"` — то же, что `["CTRL", "S"]`.
+
+`search` по имени действия показывает строку `Applies to:` — классы элементов (`class` в ответах
+`find_objects`), к которым применимо действие; источник — столбец «Применим к типам» ниже. Отказ
+`unsupported_element_type` или `unsupported_receiver` по `ref` содержит `element_class`, `applies_to`
+и `suggested_actions` — действия, применимые к этому классу. `get_context` с `ref` элемента формы
+читает форму этого элемента и возвращает её `form_ref`.
+
+Действие без подключения отвечает `not_connected`. Один живой клиент в `.testpilot-clients.json` —
+`suggested_call` `{"action": "connect", "args": {"profile": …}}`, несколько — список `running`,
+ни одного — `suggested_call` `list_profiles`. Сам testpilot не подключается.
 
 В компактных MCP-ответах `click`, `execute_command`, `choose_from_drop_list` и
 `execute_choice_from_choice_list` повторное описание окна заменяется на
@@ -536,6 +565,11 @@ tbl.find_rows(conditions=conditions)  # Python API
 | `start_logging` | Начать журнал вызовов: JSONL и выбранные HTML/Allure-отчёты | — | `screenshot_mode=None, reports=None` |
 | `stop_client` | — | — | `graceful_timeout=15` |
 | `stop_logging` | Завершить журнал MCP-вызовов | — | `—` |
+
+`connect(profile)` с профилем запуска подключается к уже запущенному клиенту, только если подходящий
+клиент ровно один: этого профиля или профиля той же базы, сервера и пользователя (с `port` — на этом
+порту). Ответ — `reused: true`. Ни одного — `profile_action_mismatch` с `suggested_call`
+`launch_client(profile)`, несколько — `client_ambiguous` со списком `running`. Новый процесс `connect` не запускает.
 
 ## `calendar` — Действия с полем календаря
 
