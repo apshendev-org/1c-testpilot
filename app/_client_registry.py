@@ -153,8 +153,8 @@ def forget(file, profile, port=None):
         _write(file, data)
 
 
-def alive(entry):
-    """A registry entry still names our 1C test client: its process, command line and listening port."""
+def owned(entry):
+    """The process of a registry entry is still our 1C client: name 1cv8* and -TPort<port>, listening or not."""
     import psutil
     try:
         pid, port = int(entry['pid']), int(entry['port'])
@@ -164,8 +164,14 @@ def alive(entry):
     except (KeyError, TypeError, ValueError, psutil.Error):
         return False
     # Имя и -TPort защищают от pid, который ОС уже отдала другому процессу.
-    if not name.startswith('1cv8') or f'-tport{port}' not in arguments:
+    return name.startswith('1cv8') and f'-tport{port}' in arguments
+
+
+def alive(entry):
+    """A registry entry still names our 1C test client: its process, command line and listening port."""
+    if not owned(entry):
         return False
+    port = int(entry['port'])
     with socket.socket() as s:
         s.settimeout(1)
         return s.connect_ex(('127.0.0.1', port)) == 0

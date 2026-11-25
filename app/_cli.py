@@ -61,18 +61,28 @@ def client_start(profile):
 
 
 def _terminate(pid):
-    """Stop a 1cv8 process; False if it is already gone. Never signals other programs."""
+    """Stop a 1cv8 process with its child processes; False if it is already gone. Never signals other programs."""
     import psutil
     try:
         process = psutil.Process(pid)
         if not process.name().lower().startswith('1cv8'):
             raise ValueError(f'Process {pid} is not a 1C client.')
-        process.terminate()
-        process.wait(timeout=15)
+        children = process.children(recursive=True)
     except psutil.NoSuchProcess:
         return False
-    except psutil.TimeoutExpired:
-        process.kill()
+    # Дочерний клиент (перезапуск 1С) держит порты не хуже родителя: сначала он, потом родитель.
+    targets = [*children, process]
+    for target in targets:
+        try:
+            target.terminate()
+        except psutil.NoSuchProcess:
+            pass
+    _, left = psutil.wait_procs(targets, timeout=15)
+    for target in left:
+        try:
+            target.kill()
+        except psutil.NoSuchProcess:
+            pass
     return True
 
 
@@ -83,7 +93,8 @@ def client_stop(profile=None, pid=None):
     entries = registry.read(file) if file is not None else {}
     if profile is not None:
         entry = entries.get(profile)
-        if entry is None or not registry.alive(entry):
+        # Не alive: клиент, упавший в «непредвиденную ошибку», не слушает -TPort, но жив и держит runMcp.
+        if entry is None or not registry.owned(entry):
             if entry is not None:
                 registry.forget(file, profile)
             _emit(dict(ok=True, profile=profile, stopped=False))
