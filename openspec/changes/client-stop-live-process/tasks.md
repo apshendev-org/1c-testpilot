@@ -5,7 +5,7 @@
 
 ## 2. Тесты (поток тестов кита)
 
-- [ ] 2.1 Матрица — в `openspec/changes/dev-ib-client-stop-start/tasks.md` кита, пп. 3.1–3.2; `tests/` testpilot, процессы — фейки по записям `docs/spikes/dev-ib-client-security-restart/recording/` кита
+- [x] 2.1 Матрица — в `openspec/changes/dev-ib-client-stop-start/tasks.md` кита, пп. 3.1–3.2; `tests/` testpilot, процессы — фейки по записям `docs/spikes/dev-ib-client-security-restart/recording/` кита
 
 ## 3. Проверка
 
