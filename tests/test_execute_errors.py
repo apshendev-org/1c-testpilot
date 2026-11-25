@@ -405,13 +405,13 @@ async def test_recorded_refusals_name_the_right_parameter_or_action(server, disp
 
 
 async def test_hint_for_a_name_with_a_line_break_keeps_the_answer_readable(server, dispatched):
-    """5.4, найдено fuzzing (FUZZ_SEED=1795630285447278537, вход 123): лишний аргумент "ref\\n" у set_area_text
-    получает did_you_mean {"ref\\n": "ref"} (difflib). Ответ execute остаётся toon, который читается обратно:
-    имя из входа — как передано, подсказка — параметр действия."""
+    """5.4, сценарий «Имя с переводом строки» (найден fuzzing, FUZZ_SEED=1795630285447278537, вход 123):
+    лишний аргумент "ref\\n" у set_area_text — отказ invalid_arguments читается как TOON, имя — как передано,
+    did_you_mean нет."""
     args = {'ref': FIELD_RECORD['ref'], 'address': 'R1C1', 'text': 'x', 'ref\n': True}
     out = await execute([{'action': 'set_area_text', 'args': args}])
     assert out['code'] == 'invalid_arguments' and out['unexpected_parameters'] == ['ref\n']
-    assert out['did_you_mean'] == {'ref\n': 'ref'}
+    assert 'did_you_mean' not in out
     assert dispatched.calls == []
 
 
@@ -471,7 +471,7 @@ async def test_fuzzed_arguments_never_crash_and_hints_name_only_real_parameters(
     """5.4 и требование fuzzing (tasks.md, группа 5): 200 пачек из 1–3 шагов действий таблицы синонимов,
     send_keys, goto_row, activate_window, click с шумными именами и значениями. Без исключений; отказ пачки —
     invalid_arguments или unresolved_reference со step в пачке; unexpected — из переданных имён,
-    did_you_mean — {переданное: параметр действия}, suggested_actions — действия каталога; до исполнения
+    did_you_mean — {переданное печатаемое имя: параметр действия}, suggested_actions — действия каталога; до исполнения
     доходят только параметры действия (кроме значений None — их отбрасывает _dispatch_action), значения — из входа (keys строкой — её части между «+»), renamed —
     {переданное: параметр}."""
     seed = int(os.environ.get('FUZZ_SEED') or time.time_ns())
@@ -497,6 +497,7 @@ async def test_fuzzed_arguments_never_crash_and_hints_name_only_real_parameters(
             assert set(out.get('missing_parameters', [])) <= params[step['action']], where
             hint = out.get('did_you_mean', {})
             assert set(hint) <= set(out.get('unexpected_parameters', [])), where
+            assert all(name.isprintable() for name in hint), where      # «Имя с переводом строки»
             assert set(hint.values()) <= params[step['action']], where
             assert set(out.get('suggested_actions', [])) <= catalog, where
             continue
